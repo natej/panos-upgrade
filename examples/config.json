@@ -5,6 +5,11 @@
     "rate_limit": 10,
     "timeout": 300
   },
+  "firewall": {
+    "username": "admin",
+    "password": "YOUR_FIREWALL_PASSWORD",
+    "timeout": 300
+  },
   "workers": {
     "max": 5,
     "queue_size": 1000
@@ -23,6 +28,7 @@
   },
   "paths": {
     "upgrade_paths": "/var/lib/panos-upgrade/config/upgrade_paths.json",
+    "version_hashes": "/var/lib/panos-upgrade/config/version_hashes.json",
     "work_dir": "/var/lib/panos-upgrade"
   }
 }

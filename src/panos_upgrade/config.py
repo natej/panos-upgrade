@@ -40,6 +40,11 @@ class Config:
                 "rate_limit": constants.DEFAULT_RATE_LIMIT,
                 "timeout": constants.DEFAULT_TIMEOUT
             },
+            "firewall": {
+                "username": "",
+                "password": "",
+                "timeout": constants.DEFAULT_TIMEOUT
+            },
             "workers": {
                 "max": constants.DEFAULT_WORKERS,
                 "queue_size": 1000
@@ -171,6 +176,16 @@ class Config:
     def upgrade_paths_file(self) -> Path:
         """Get upgrade paths file path."""
         return Path(self.get("paths.upgrade_paths", str(constants.DEFAULT_UPGRADE_PATHS_FILE)))
+    
+    @property
+    def firewall_username(self) -> str:
+        """Get firewall username."""
+        return self.get("firewall.username", "")
+    
+    @property
+    def firewall_password(self) -> str:
+        """Get firewall password."""
+        return self.get("firewall.password", "")
 
 
 # Global config instance

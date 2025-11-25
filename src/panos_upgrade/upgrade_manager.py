@@ -583,7 +583,8 @@ class UpgradeManager:
             if not dry_run:
                 firewall_client = DirectFirewallClient(
                     mgmt_ip=mgmt_ip,
-                    api_key=self.config.panorama_api_key,  # Same key
+                    username=self.config.firewall_username,
+                    password=self.config.firewall_password,
                     rate_limiter=None  # No rate limiting for direct connections
                 )
             

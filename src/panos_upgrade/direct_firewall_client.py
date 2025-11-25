@@ -12,17 +12,19 @@ from panos_upgrade.config import Config
 class DirectFirewallClient:
     """Client for direct firewall connections (not through Panorama)."""
     
-    def __init__(self, mgmt_ip: str, api_key: str, rate_limiter=None):
+    def __init__(self, mgmt_ip: str, username: str, password: str, rate_limiter=None):
         """
         Initialize direct firewall client.
         
         Args:
             mgmt_ip: Firewall management IP address
-            api_key: API key for authentication
+            username: Username for authentication
+            password: Password for authentication
             rate_limiter: Rate limiter instance (optional)
         """
         self.mgmt_ip = mgmt_ip
-        self.api_key = api_key
+        self.username = username
+        self.password = password
         self.rate_limiter = rate_limiter
         self.logger = get_logger("panos_upgrade.direct_firewall")
         self._xapi: Optional[PanXapi] = None
@@ -31,14 +33,18 @@ class DirectFirewallClient:
         """Get or create PanXapi instance."""
         if self._xapi is None:
             try:
-                # Direct firewall connections use HTTPS
+                # Check if connecting to localhost (mock server)
+                use_http = 'localhost' in self.mgmt_ip or '127.0.0.1' in self.mgmt_ip
+                
+                # Direct firewall connections use username/password
                 self._xapi = PanXapi(
-                    api_key=self.api_key,
+                    api_username=self.username,
+                    api_password=self.password,
                     hostname=self.mgmt_ip,
                     timeout=300,
-                    use_http=False  # Firewalls use HTTPS
+                    use_http=use_http  # Mock uses HTTP, real firewalls use HTTPS
                 )
-                self.logger.info(f"Connected to firewall: {self.mgmt_ip}")
+                self.logger.info(f"Connected to firewall: {self.mgmt_ip} (user: {self.username})")
             except PanXapiError as e:
                 self.logger.error(f"Failed to connect to firewall {self.mgmt_ip}: {e}")
                 raise
