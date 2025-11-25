@@ -1,3 +1,7 @@
+# DO NOT USE THIS PROJECT OR ANY CODE IN THIS REPO IN ANY WAY!
+# IT IS AI-GENERATED AND IS HERE ONLY TEMPORARILY!
+# EVERYTHING HERE IS EXPERIMENTAL AND HAS NOT BEEN TESTED!
+
 # PAN-OS Upgrade Manager
 
 Advanced CLI application for managing PAN-OS device upgrades through Panorama with daemon capabilities, concurrent processing, and comprehensive validation.
