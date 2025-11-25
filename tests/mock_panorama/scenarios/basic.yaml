@@ -1,0 +1,65 @@
+# Basic test scenario with 3 standalone devices
+
+api_key: "test-api-key"
+
+timing:
+  download_duration: 10   # seconds (fast for testing)
+  install_duration: 5
+  reboot_duration: 15
+
+version_hashes:
+  "10.0.2": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+  "10.1.0": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3"
+  "10.5.1": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4"
+  "11.0.0": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5"
+  "11.0.3": "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6"
+  "11.1.0": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
+
+devices:
+  - serial: "001234567890"
+    hostname: "fw-test-1"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 15.0
+    available_versions:
+      - "10.1.0"
+      - "10.5.1"
+      - "11.1.0"
+  
+  - serial: "001234567891"
+    hostname: "fw-test-2"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.1.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 52000
+      route_count: 1500
+      arp_count: 600
+      disk_space_gb: 20.0
+    available_versions:
+      - "11.1.0"
+  
+  - serial: "001234567892"
+    hostname: "fw-test-3"
+    model: "PA-3220"
+    current_version: "11.0.0"
+    ip_address: "192.168.1.12"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 38000
+      route_count: 1000
+      arp_count: 450
+      disk_space_gb: 12.0
+    available_versions:
+      - "11.0.3"
+      - "11.1.0"
+
+failures: []
+

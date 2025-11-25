@@ -1,0 +1,9 @@
+{
+  "command": "cancel_upgrade",
+  "target": "job",
+  "job_id": "job-001",
+  "device_serial": "",
+  "reason": "Admin takeover required",
+  "timestamp": "2025-11-21T00:00:00Z"
+}
+

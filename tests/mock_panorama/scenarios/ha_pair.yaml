@@ -1,0 +1,44 @@
+# HA pair test scenario
+
+api_key: "test-api-key"
+
+timing:
+  download_duration: 10
+  install_duration: 5
+  reboot_duration: 15
+
+devices:
+  - serial: "001234567890"
+    hostname: "fw-ha-primary"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.1.10"
+    ha_enabled: true
+    ha_role: "active"
+    ha_peer: "001234567891"
+    metrics:
+      tcp_sessions: 65000
+      route_count: 2000
+      arp_count: 800
+      disk_space_gb: 25.0
+    available_versions:
+      - "11.1.0"
+  
+  - serial: "001234567891"
+    hostname: "fw-ha-secondary"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.1.11"
+    ha_enabled: true
+    ha_role: "passive"
+    ha_peer: "001234567890"
+    metrics:
+      tcp_sessions: 100  # Passive has minimal sessions
+      route_count: 2000
+      arp_count: 800
+      disk_space_gb: 25.0
+    available_versions:
+      - "11.1.0"
+
+failures: []
+

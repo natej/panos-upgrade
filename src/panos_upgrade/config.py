@@ -1,0 +1,195 @@
+"""Configuration management."""
+
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from panos_upgrade import constants
+from panos_upgrade.utils.file_ops import atomic_write_json, safe_read_json, ensure_directory_structure
+
+
+class Config:
+    """Application configuration manager."""
+    
+    def __init__(self, config_file: Optional[Path] = None, work_dir: Optional[Path] = None):
+        """
+        Initialize configuration.
+        
+        Args:
+            config_file: Path to config file (default: /var/lib/panos-upgrade/config/config.json)
+            work_dir: Working directory (default: /var/lib/panos-upgrade)
+        """
+        self.work_dir = Path(work_dir) if work_dir else constants.DEFAULT_WORK_DIR
+        self.config_file = Path(config_file) if config_file else constants.DEFAULT_CONFIG_FILE
+        self._config: Dict[str, Any] = {}
+        self._load_config()
+    
+    def _load_config(self) -> None:
+        """Load configuration from file or create default."""
+        self._config = safe_read_json(self.config_file, self._get_default_config())
+        
+        # Ensure work directory structure exists
+        self._ensure_directories()
+    
+    def _get_default_config(self) -> Dict[str, Any]:
+        """Get default configuration."""
+        return {
+            "panorama": {
+                "host": "",
+                "api_key": "",
+                "rate_limit": constants.DEFAULT_RATE_LIMIT,
+                "timeout": constants.DEFAULT_TIMEOUT
+            },
+            "workers": {
+                "max": constants.DEFAULT_WORKERS,
+                "queue_size": 1000
+            },
+            "validation": {
+                "tcp_session_margin": constants.DEFAULT_TCP_SESSION_MARGIN,
+                "route_margin": constants.DEFAULT_ROUTE_MARGIN,
+                "arp_margin": constants.DEFAULT_ARP_MARGIN,
+                "min_disk_gb": constants.DEFAULT_MIN_DISK_GB,
+                "custom_metrics": []
+            },
+            "logging": {
+                "level": constants.DEFAULT_LOG_LEVEL,
+                "max_size_mb": constants.DEFAULT_LOG_MAX_SIZE_MB,
+                "retention_days": constants.DEFAULT_LOG_RETENTION_DAYS
+            },
+            "paths": {
+                "upgrade_paths": str(self.work_dir / "config" / "upgrade_paths.json"),
+                "work_dir": str(self.work_dir)
+            }
+        }
+    
+    def _ensure_directories(self) -> None:
+        """Ensure all required directories exist."""
+        directories = [
+            constants.DIR_CONFIG,
+            constants.DIR_DEVICES,
+            constants.DIR_QUEUE_PENDING,
+            constants.DIR_QUEUE_ACTIVE,
+            constants.DIR_QUEUE_COMPLETED,
+            constants.DIR_QUEUE_CANCELLED,
+            constants.DIR_STATUS,
+            constants.DIR_STATUS_DEVICES,
+            constants.DIR_STATUS_HA_PAIRS,
+            constants.DIR_LOGS_STRUCTURED,
+            constants.DIR_LOGS_TEXT,
+            constants.DIR_VALIDATION_PRE,
+            constants.DIR_VALIDATION_POST,
+            constants.DIR_COMMANDS_INCOMING,
+            constants.DIR_COMMANDS_PROCESSED,
+        ]
+        ensure_directory_structure(self.work_dir, directories)
+    
+    def save(self) -> None:
+        """Save configuration to file."""
+        atomic_write_json(self.config_file, self._config)
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value by dot-notation key.
+        
+        Args:
+            key: Configuration key (e.g., "panorama.host")
+            default: Default value if key not found
+            
+        Returns:
+            Configuration value
+        """
+        keys = key.split('.')
+        value = self._config
+        
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                return default
+        
+        return value
+    
+    def set(self, key: str, value: Any) -> None:
+        """
+        Set configuration value by dot-notation key.
+        
+        Args:
+            key: Configuration key (e.g., "panorama.host")
+            value: Value to set
+        """
+        keys = key.split('.')
+        config = self._config
+        
+        # Navigate to the parent dictionary
+        for k in keys[:-1]:
+            if k not in config:
+                config[k] = {}
+            config = config[k]
+        
+        # Set the value
+        config[keys[-1]] = value
+        self.save()
+    
+    def get_path(self, relative_path: str) -> Path:
+        """
+        Get absolute path for a relative path within work directory.
+        
+        Args:
+            relative_path: Relative path from work directory
+            
+        Returns:
+            Absolute Path object
+        """
+        return self.work_dir / relative_path
+    
+    @property
+    def panorama_host(self) -> str:
+        """Get Panorama host."""
+        return self.get("panorama.host", "")
+    
+    @property
+    def panorama_api_key(self) -> str:
+        """Get Panorama API key."""
+        return self.get("panorama.api_key", "")
+    
+    @property
+    def max_workers(self) -> int:
+        """Get maximum number of workers."""
+        return min(self.get("workers.max", constants.DEFAULT_WORKERS), constants.MAX_WORKERS)
+    
+    @property
+    def rate_limit(self) -> int:
+        """Get API rate limit."""
+        return self.get("panorama.rate_limit", constants.DEFAULT_RATE_LIMIT)
+    
+    @property
+    def min_disk_gb(self) -> float:
+        """Get minimum required disk space in GB."""
+        return self.get("validation.min_disk_gb", constants.DEFAULT_MIN_DISK_GB)
+    
+    @property
+    def upgrade_paths_file(self) -> Path:
+        """Get upgrade paths file path."""
+        return Path(self.get("paths.upgrade_paths", str(constants.DEFAULT_UPGRADE_PATHS_FILE)))
+
+
+# Global config instance
+_config: Optional[Config] = None
+
+
+def get_config(config_file: Optional[Path] = None, work_dir: Optional[Path] = None) -> Config:
+    """
+    Get global configuration instance.
+    
+    Args:
+        config_file: Path to config file (only used on first call)
+        work_dir: Working directory (only used on first call)
+        
+    Returns:
+        Config instance
+    """
+    global _config
+    if _config is None:
+        _config = Config(config_file, work_dir)
+    return _config
+

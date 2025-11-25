@@ -1,0 +1,142 @@
+# Large scale test scenario with 10 devices
+
+api_key: "test-api-key"
+
+timing:
+  download_duration: 10
+  install_duration: 5
+  reboot_duration: 15
+
+devices:
+  - serial: "001234567890"
+    hostname: "fw-dc1-01"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 15.0
+    available_versions: ["10.1.0", "10.5.1", "11.1.0"]
+  
+  - serial: "001234567891"
+    hostname: "fw-dc1-02"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 42000
+      route_count: 1150
+      arp_count: 480
+      disk_space_gb: 14.0
+    available_versions: ["10.1.0", "10.5.1", "11.1.0"]
+  
+  - serial: "001234567892"
+    hostname: "fw-dc2-01"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.2.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 58000
+      route_count: 1800
+      arp_count: 650
+      disk_space_gb: 22.0
+    available_versions: ["11.1.0"]
+  
+  - serial: "001234567893"
+    hostname: "fw-dc2-02"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.2.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 55000
+      route_count: 1750
+      arp_count: 620
+      disk_space_gb: 21.0
+    available_versions: ["11.1.0"]
+  
+  - serial: "001234567894"
+    hostname: "fw-branch-01"
+    model: "PA-220"
+    current_version: "11.0.0"
+    ip_address: "192.168.3.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 25000
+      route_count: 800
+      arp_count: 300
+      disk_space_gb: 8.0
+    available_versions: ["11.0.3", "11.1.0"]
+  
+  - serial: "001234567895"
+    hostname: "fw-branch-02"
+    model: "PA-220"
+    current_version: "11.0.0"
+    ip_address: "192.168.3.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 23000
+      route_count: 780
+      arp_count: 290
+      disk_space_gb: 7.5
+    available_versions: ["11.0.3", "11.1.0"]
+  
+  - serial: "001234567896"
+    hostname: "fw-edge-01"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.4.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 48000
+      route_count: 1300
+      arp_count: 520
+      disk_space_gb: 16.0
+    available_versions: ["10.1.0", "10.5.1", "11.1.0"]
+  
+  - serial: "001234567897"
+    hostname: "fw-edge-02"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.4.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 46000
+      route_count: 1280
+      arp_count: 510
+      disk_space_gb: 15.5
+    available_versions: ["10.1.0", "10.5.1", "11.1.0"]
+  
+  - serial: "001234567898"
+    hostname: "fw-dmz-01"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.5.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 72000
+      route_count: 2200
+      arp_count: 850
+      disk_space_gb: 28.0
+    available_versions: ["11.1.0"]
+  
+  - serial: "001234567899"
+    hostname: "fw-dmz-02"
+    model: "PA-5220"
+    current_version: "10.5.1"
+    ip_address: "192.168.5.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 70000
+      route_count: 2180
+      arp_count: 840
+      disk_space_gb: 27.0
+    available_versions: ["11.1.0"]
+
+failures: []
+

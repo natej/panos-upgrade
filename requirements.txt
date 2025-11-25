@@ -1,0 +1,5 @@
+pan-python>=0.17.0
+click>=8.1.0
+pyyaml>=6.0
+watchdog>=3.0.0
+

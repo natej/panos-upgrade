@@ -1,0 +1,39 @@
+{
+  "10.0.2": {
+    "sha256": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    "filename": "PanOS_3200-10.0.2",
+    "size_mb": 450,
+    "release_date": "2023-01-15"
+  },
+  "10.1.0": {
+    "sha256": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3",
+    "filename": "PanOS_3200-10.1.0",
+    "size_mb": 460,
+    "release_date": "2023-06-20"
+  },
+  "10.5.1": {
+    "sha256": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4",
+    "filename": "PanOS_5200-10.5.1",
+    "size_mb": 500,
+    "release_date": "2024-03-10"
+  },
+  "11.0.0": {
+    "sha256": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5",
+    "filename": "PanOS_vm-11.0.0",
+    "size_mb": 520,
+    "release_date": "2024-06-01"
+  },
+  "11.0.3": {
+    "sha256": "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
+    "filename": "PanOS_vm-11.0.3",
+    "size_mb": 530,
+    "release_date": "2024-08-15"
+  },
+  "11.1.0": {
+    "sha256": "f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7",
+    "filename": "PanOS_vm-11.1.0",
+    "size_mb": 550,
+    "release_date": "2024-09-15"
+  }
+}
+

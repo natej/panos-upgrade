@@ -1,0 +1,29 @@
+{
+  "panorama": {
+    "host": "panorama.example.com",
+    "api_key": "YOUR_API_KEY_HERE",
+    "rate_limit": 10,
+    "timeout": 300
+  },
+  "workers": {
+    "max": 5,
+    "queue_size": 1000
+  },
+  "validation": {
+    "tcp_session_margin": 5.0,
+    "route_margin": 0.0,
+    "arp_margin": 0.0,
+    "min_disk_gb": 5.0,
+    "custom_metrics": []
+  },
+  "logging": {
+    "level": "INFO",
+    "max_size_mb": 100,
+    "retention_days": 30
+  },
+  "paths": {
+    "upgrade_paths": "/var/lib/panos-upgrade/config/upgrade_paths.json",
+    "work_dir": "/var/lib/panos-upgrade"
+  }
+}
+

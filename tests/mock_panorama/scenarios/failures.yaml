@@ -1,0 +1,90 @@
+# Failure injection test scenario
+
+api_key: "test-api-key"
+
+timing:
+  download_duration: 10
+  install_duration: 5
+  reboot_duration: 15
+
+devices:
+  - serial: "001234567890"
+    hostname: "fw-download-fail"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.10"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 15.0
+    available_versions:
+      - "10.1.0"
+      - "10.5.1"
+      - "11.1.0"
+  
+  - serial: "001234567891"
+    hostname: "fw-install-fail"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.11"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 15.0
+    available_versions:
+      - "10.1.0"
+      - "10.5.1"
+      - "11.1.0"
+  
+  - serial: "001234567892"
+    hostname: "fw-reboot-fail"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.12"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 15.0
+    available_versions:
+      - "10.1.0"
+      - "10.5.1"
+      - "11.1.0"
+  
+  - serial: "001234567893"
+    hostname: "fw-low-disk"
+    model: "PA-3220"
+    current_version: "10.0.2"
+    ip_address: "192.168.1.13"
+    ha_enabled: false
+    metrics:
+      tcp_sessions: 45000
+      route_count: 1200
+      arp_count: 500
+      disk_space_gb: 1.5  # Insufficient disk space
+    available_versions:
+      - "10.1.0"
+      - "10.5.1"
+      - "11.1.0"
+
+failures:
+  - device: "001234567890"
+    operation: "download"
+    failure_rate: 1.0  # 100% failure
+    error: "Connection timeout"
+  
+  - device: "001234567891"
+    operation: "install"
+    failure_rate: 1.0
+    error: "Installation failed"
+  
+  - device: "001234567892"
+    operation: "reboot"
+    failure_rate: 1.0
+    error: "Device did not come back online"
+
