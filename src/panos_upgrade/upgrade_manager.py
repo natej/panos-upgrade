@@ -580,6 +580,9 @@ class UpgradeManager:
             self._save_device_status(device_status)
             
             # Create direct firewall client
+            firewall_client = None
+            existing_versions = {}
+            
             if not dry_run:
                 firewall_client = DirectFirewallClient(
                     mgmt_ip=mgmt_ip,
@@ -616,7 +619,21 @@ class UpgradeManager:
                     f"Disk space check passed: {disk_space_gb:.2f} GB available"
                 )
             
-            # Download each version in path
+            # Check for already-downloaded versions
+            device_status.upgrade_message = "Checking existing software on device"
+            self._save_device_status(device_status)
+            
+            if not dry_run:
+                existing_versions = firewall_client.get_downloaded_versions()
+                
+                # Log what we found
+                already_downloaded = [v for v in upgrade_path if existing_versions.get(v, {}).get("downloaded", False)]
+                if already_downloaded:
+                    self.logger.info(
+                        f"Found {len(already_downloaded)} version(s) already downloaded on {serial}: {', '.join(already_downloaded)}"
+                    )
+            
+            # Download each version in path (skip if already present)
             for idx, version in enumerate(upgrade_path):
                 # Check for cancellation
                 if self._is_cancelled(job_id, serial):
@@ -631,6 +648,28 @@ class UpgradeManager:
                 device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
                 progress_base = 10 + (idx * 80 // len(upgrade_path))
                 device_status.progress = progress_base
+                
+                # Check if version is already downloaded
+                version_info = existing_versions.get(version, {})
+                already_downloaded = version_info.get("downloaded", False)
+                
+                if already_downloaded and not dry_run:
+                    # Version already present - skip download
+                    self.logger.info(
+                        f"Version {version} already downloaded on {serial}, skipping"
+                    )
+                    device_status.upgrade_message = f"Version {version} already downloaded, skipping ({idx + 1}/{len(upgrade_path)})"
+                    device_status.skipped_versions.append(version)
+                    
+                    # Store existing hash if available
+                    existing_hash = version_info.get("sha256", "")
+                    if existing_hash:
+                        device_status.version_hashes[version] = existing_hash
+                        device_status.hash_verification[version] = "skipped_existing"
+                    
+                    self._save_device_status(device_status)
+                    continue
+                
                 device_status.upgrade_message = f"Downloading version {version} ({idx + 1}/{len(upgrade_path)})"
                 self._save_device_status(device_status)
                 
@@ -688,11 +727,30 @@ class UpgradeManager:
             device_status.upgrade_status = constants.STATUS_DOWNLOAD_COMPLETE
             device_status.progress = 100
             device_status.ready_for_install = True
-            versions_str = ", ".join(device_status.downloaded_versions)
-            device_status.upgrade_message = f"Downloaded and verified versions: {versions_str}"
-            self._save_device_status(device_status)
             
-            msg = f"Download complete for {serial}: {versions_str}"
+            # Build summary message
+            downloaded_count = len(device_status.downloaded_versions)
+            skipped_count = len(device_status.skipped_versions)
+            
+            if downloaded_count > 0 and skipped_count > 0:
+                downloaded_str = ", ".join(device_status.downloaded_versions)
+                skipped_str = ", ".join(device_status.skipped_versions)
+                device_status.upgrade_message = (
+                    f"Downloaded {downloaded_count} version(s): {downloaded_str}. "
+                    f"Skipped {skipped_count} (already present): {skipped_str}"
+                )
+                msg = f"Download complete for {serial}: {downloaded_count} downloaded, {skipped_count} skipped (already present)"
+            elif downloaded_count > 0:
+                versions_str = ", ".join(device_status.downloaded_versions)
+                device_status.upgrade_message = f"Downloaded and verified {downloaded_count} version(s): {versions_str}"
+                msg = f"Download complete for {serial}: {versions_str}"
+            else:
+                # All versions were already present
+                skipped_str = ", ".join(device_status.skipped_versions)
+                device_status.upgrade_message = f"All {skipped_count} version(s) already downloaded: {skipped_str}"
+                msg = f"Download complete for {serial}: all versions already present"
+            
+            self._save_device_status(device_status)
             self.logger.info(msg, extra={'serial': serial})
             return True, msg
             

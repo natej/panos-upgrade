@@ -225,4 +225,40 @@ class DirectFirewallClient:
             f"Download did not complete within {timeout} seconds on {self.mgmt_ip}"
         )
         return False
+    
+    def get_downloaded_versions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get list of already-downloaded software versions.
+        
+        Returns:
+            Dictionary mapping version to info dict with keys:
+            - downloaded: bool
+            - current: bool (installed/running)
+            - sha256: str (hash if available)
+        """
+        self.logger.debug(f"Checking downloaded versions on {self.mgmt_ip}")
+        
+        try:
+            software_info = self.get_software_info()
+            
+            result = {}
+            for sw in software_info.get("versions", []):
+                version = sw.get("version", "")
+                if version:
+                    result[version] = {
+                        "downloaded": sw.get("downloaded", "no").lower() == "yes",
+                        "current": sw.get("current", "no").lower() == "yes",
+                        "sha256": sw.get("sha256", "")
+                    }
+            
+            downloaded_count = sum(1 for v in result.values() if v["downloaded"])
+            self.logger.info(
+                f"Found {downloaded_count} downloaded versions on {self.mgmt_ip}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get downloaded versions from {self.mgmt_ip}: {e}")
+            raise
 

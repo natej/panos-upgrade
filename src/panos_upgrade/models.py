@@ -130,6 +130,7 @@ class DeviceStatus:
     upgrade_message: str = ""
     disk_space: Optional[DiskSpaceInfo] = None
     downloaded_versions: List[str] = field(default_factory=list)
+    skipped_versions: List[str] = field(default_factory=list)  # Versions already present on device
     version_hashes: Dict[str, str] = field(default_factory=dict)
     hash_verification: Dict[str, str] = field(default_factory=dict)
     ready_for_install: bool = False
