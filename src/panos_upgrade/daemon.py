@@ -20,7 +20,6 @@ from panos_upgrade.panorama_client import PanoramaClient
 from panos_upgrade.validation import ValidationSystem
 from panos_upgrade.upgrade_manager import UpgradeManager
 from panos_upgrade.device_inventory import DeviceInventory
-from panos_upgrade.hash_manager import HashManager
 from panos_upgrade import constants
 
 
@@ -95,18 +94,12 @@ class UpgradeDaemon:
         inventory_file = self.config.get_path("devices/inventory.json")
         self.device_inventory = DeviceInventory(inventory_file, self.panorama_client)
         
-        # Initialize hash manager
-        default_hash_file = self.config.work_dir / constants.CONFIG_SUBDIR / constants.VERSION_HASHES_FILE_NAME
-        hash_file = self.config.get("paths.version_hashes", str(default_hash_file))
-        self.hash_manager = HashManager(Path(hash_file))
-        
         # Initialize upgrade manager
         self.upgrade_manager = UpgradeManager(
             self.config,
             self.panorama_client,
             self.validation_system,
-            self.device_inventory,
-            self.hash_manager
+            self.device_inventory
         )
         
         # Signal handlers

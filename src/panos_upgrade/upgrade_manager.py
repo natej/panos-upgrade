@@ -17,10 +17,6 @@ from panos_upgrade.validation import ValidationSystem
 from panos_upgrade.utils.file_ops import atomic_write_json, read_json, safe_read_json
 from panos_upgrade.device_inventory import DeviceInventory
 from panos_upgrade.direct_firewall_client import DirectFirewallClient
-from panos_upgrade.hash_manager import HashManager
-from panos_upgrade.exceptions import (
-    HashMismatchError, HashNotFoundError, DownloadVerificationError
-)
 from panos_upgrade import constants
 
 
@@ -43,8 +39,7 @@ class UpgradeManager:
         config: Config,
         panorama_client: PanoramaClient,
         validation_system: ValidationSystem,
-        device_inventory: DeviceInventory,
-        hash_manager: HashManager
+        device_inventory: DeviceInventory
     ):
         """
         Initialize upgrade manager.
@@ -54,13 +49,11 @@ class UpgradeManager:
             panorama_client: Panorama client instance
             validation_system: Validation system instance
             device_inventory: Device inventory instance
-            hash_manager: Hash manager instance
         """
         self.config = config
         self.panorama = panorama_client
         self.validation = validation_system
         self.inventory = device_inventory
-        self.hash_manager = hash_manager
         self.logger = get_logger("panos_upgrade.manager")
         
         # Load upgrade paths
@@ -660,13 +653,6 @@ class UpgradeManager:
                     )
                     device_status.upgrade_message = f"Version {version} already downloaded, skipping ({idx + 1}/{len(upgrade_path)})"
                     device_status.skipped_versions.append(version)
-                    
-                    # Store existing hash if available
-                    existing_hash = version_info.get("sha256", "")
-                    if existing_hash:
-                        device_status.version_hashes[version] = existing_hash
-                        device_status.hash_verification[version] = "skipped_existing"
-                    
                     self._save_device_status(device_status)
                     continue
                 
@@ -702,25 +688,9 @@ class UpgradeManager:
                         self._save_device_status(device_status)
                         return False, msg
                     
-                    # Verify hash
-                    device_status.upgrade_message = f"Verifying download integrity for {version}"
-                    self._save_device_status(device_status)
-                    
-                    verified, hash_value = self._verify_download(firewall_client, serial, version)
-                    
-                    if not verified:
-                        msg = f"Hash verification failed for {version}"
-                        device_status.add_error("download", msg)
-                        device_status.upgrade_status = UpgradeStatus.FAILED.value
-                        device_status.upgrade_message = msg
-                        self._save_device_status(device_status)
-                        return False, msg
-                    
-                    # Store hash and mark as downloaded
-                    device_status.version_hashes[version] = hash_value
+                    # Mark as downloaded
                     device_status.downloaded_versions.append(version)
-                    device_status.hash_verification[version] = "passed"
-                    device_status.upgrade_message = f"Downloaded and verified {version}"
+                    device_status.upgrade_message = f"Downloaded {version}"
                     self._save_device_status(device_status)
             
             # All downloads complete
@@ -742,7 +712,7 @@ class UpgradeManager:
                 msg = f"Download complete for {serial}: {downloaded_count} downloaded, {skipped_count} skipped (already present)"
             elif downloaded_count > 0:
                 versions_str = ", ".join(device_status.downloaded_versions)
-                device_status.upgrade_message = f"Downloaded and verified {downloaded_count} version(s): {versions_str}"
+                device_status.upgrade_message = f"Downloaded {downloaded_count} version(s): {versions_str}"
                 msg = f"Download complete for {serial}: {versions_str}"
             else:
                 # All versions were already present
@@ -762,63 +732,3 @@ class UpgradeManager:
             device_status.add_error("download", msg, str(e))
             self._save_device_status(device_status)
             return False, msg
-    
-    def _verify_download(
-        self,
-        client: DirectFirewallClient,
-        serial: str,
-        version: str
-    ) -> Tuple[bool, str]:
-        """
-        Verify downloaded software hash.
-        
-        Args:
-            client: Direct firewall client
-            serial: Device serial number
-            version: Software version
-            
-        Returns:
-            Tuple of (success, hash_value)
-        """
-        try:
-            # Get software info from firewall
-            software_info = client.get_software_info()
-            
-            # Find the downloaded version
-            actual_hash = None
-            for sw in software_info.get("versions", []):
-                if sw["version"] == version and sw["downloaded"] == "yes":
-                    actual_hash = sw.get("sha256", "")
-                    break
-            
-            if not actual_hash:
-                self.logger.error(
-                    f"Could not retrieve hash for downloaded version {version} on {serial}"
-                )
-                return False, ""
-            
-            self.logger.info(
-                f"Retrieved hash for {version} on {serial}: {actual_hash[:16]}..."
-            )
-            
-            # Verify against expected hash
-            verify_hashes = self.config.get("validation.verify_hashes", True)
-            
-            if verify_hashes:
-                try:
-                    self.hash_manager.verify_hash(version, actual_hash, strict=False)
-                    self.logger.info(f"Hash verification passed for {version}")
-                except HashMismatchError as e:
-                    self.logger.error(f"Hash mismatch for {version}: {e}")
-                    return False, actual_hash
-                except HashNotFoundError:
-                    self.logger.warning(
-                        f"No expected hash for {version}, accepting firewall hash"
-                    )
-            
-            return True, actual_hash
-            
-        except Exception as e:
-            self.logger.error(f"Hash verification error for {version}: {e}", exc_info=True)
-            return False, ""
-

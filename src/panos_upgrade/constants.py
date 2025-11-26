@@ -12,7 +12,6 @@ DEFAULT_WORK_DIR = Path("/opt/panos-upgrade")
 CONFIG_SUBDIR = "config"
 CONFIG_FILE_NAME = "config.json"
 UPGRADE_PATHS_FILE_NAME = "upgrade_paths.json"
-VERSION_HASHES_FILE_NAME = "version_hashes.json"
 DEVICE_INVENTORY_FILE_NAME = "inventory.json"
 
 # Directory structure

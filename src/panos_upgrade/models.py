@@ -131,8 +131,6 @@ class DeviceStatus:
     disk_space: Optional[DiskSpaceInfo] = None
     downloaded_versions: List[str] = field(default_factory=list)
     skipped_versions: List[str] = field(default_factory=list)  # Versions already present on device
-    version_hashes: Dict[str, str] = field(default_factory=dict)
-    hash_verification: Dict[str, str] = field(default_factory=dict)
     ready_for_install: bool = False
     last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     skip_reason: str = ""
