@@ -210,11 +210,11 @@ class PanoramaClient:
         """
         Parse df-like disk space output from PAN-OS.
         
-        Looks for /opt/pancfg partition first (where software downloads),
+        Looks for /opt/panrepo partition first (where software downloads),
         then falls back to root partition.
         
         Example output line:
-        /dev/sda5     7.6G  4.0G  3.3G   55% /opt/pancfg
+        /dev/sda8     7.6G  4.0G  3.3G   55% /opt/panrepo
         
         Args:
             text_output: Raw text from disk-space command
@@ -226,8 +226,8 @@ class PanoramaClient:
         
         lines = text_output.strip().split('\n')
         
-        # Priority order: /opt/pancfg (software downloads), then root /
-        target_mounts = ['/opt/pancfg', '/']
+        # Priority order: /opt/panrepo (software downloads), then root /
+        target_mounts = ['/opt/panrepo', '/']
         
         for target_mount in target_mounts:
             for line in lines:
