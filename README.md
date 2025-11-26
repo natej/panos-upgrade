@@ -309,9 +309,9 @@ Every command logs which source was used at INFO level:
    - Skip if current version not in upgrade paths
 
 2. **Download**
-   - Download software image to device
+   - Check if image already downloaded (skip if present)
+   - Download software image to device if needed
    - Monitor download progress
-   - Verify download completion
 
 3. **Install**
    - Install software on device

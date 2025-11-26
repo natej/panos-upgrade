@@ -516,7 +516,7 @@ panos-upgrade job submit --device 001234567890
 | Connection | Via Panorama | Direct to firewall |
 | Operations | Download + Install + Reboot | Download only |
 | Validation | Full (sessions, routes, ARP) | Disk space only |
-| Skip Detection | No | Yes (skips existing) |
+| Skip Detection | Yes (skips existing) | Yes (skips existing) |
 | Duration | ~25 min per device | ~5 min per device |
 | Panorama Load | High | Low (discovery only) |
 | Use Case | Complete upgrade | Pre-staging |
@@ -530,7 +530,7 @@ A: No, they are mutually exclusive per device to prevent conflicts.
 A: Already-downloaded versions are automatically skipped. Only missing versions are downloaded.
 
 **Q: Do I need to download again for normal upgrade?**  
-A: Future enhancement will detect pre-downloaded images. Currently, normal upgrade will re-download.
+A: No! Normal upgrades now detect pre-downloaded images and skip the download phase automatically.
 
 **Q: Can I cancel a download-only job?**  
 A: Yes, same as normal jobs: `panos-upgrade job cancel JOB_ID`

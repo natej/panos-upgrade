@@ -317,11 +317,11 @@ class UpgradeManager:
                     check_passed=True
                 )
             
-            # Phase 2: Download
+            # Phase 2: Download (skip if already downloaded)
             device_status.current_phase = UpgradePhase.DOWNLOAD.value
             device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
             device_status.progress = 30
-            device_status.upgrade_message = f"Downloading version {target_version}"
+            device_status.upgrade_message = f"Checking if version {target_version} is already downloaded"
             self._save_device_status(device_status)
             
             if dry_run:
@@ -330,15 +330,30 @@ class UpgradeManager:
                 self._save_device_status(device_status)
                 time.sleep(2)  # Simulate download
             else:
-                success = self.panorama.download_software(serial, target_version)
-                if not success:
-                    error = f"Failed to initiate download of {target_version}"
-                    device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
-                    self._save_device_status(device_status)
-                    return False
+                # Check if version is already downloaded
+                already_downloaded = self._is_version_downloaded(serial, target_version)
                 
-                # Wait for download to complete
-                self._wait_for_download(serial, device_status)
+                if already_downloaded:
+                    self.logger.info(
+                        f"Version {target_version} already downloaded on {serial}, skipping download"
+                    )
+                    device_status.upgrade_message = f"Version {target_version} already downloaded, skipping to install"
+                    device_status.skipped_versions.append(target_version)
+                    self._save_device_status(device_status)
+                else:
+                    device_status.upgrade_message = f"Downloading version {target_version}"
+                    self._save_device_status(device_status)
+                    
+                    success = self.panorama.download_software(serial, target_version)
+                    if not success:
+                        error = f"Failed to initiate download of {target_version}"
+                        device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
+                        self._save_device_status(device_status)
+                        return False
+                    
+                    # Wait for download to complete
+                    self._wait_for_download(serial, device_status)
+                    device_status.downloaded_versions.append(target_version)
             
             # Phase 3: Install
             device_status.current_phase = UpgradePhase.INSTALL.value
@@ -466,6 +481,31 @@ class UpgradeManager:
                 time.sleep(30)
         
         raise TimeoutError(f"Download did not complete within {max_wait} seconds")
+    
+    def _is_version_downloaded(self, serial: str, version: str) -> bool:
+        """
+        Check if a software version is already downloaded on the device.
+        
+        Args:
+            serial: Device serial number
+            version: Software version to check
+            
+        Returns:
+            True if version is already downloaded
+        """
+        try:
+            software_info = self.panorama.get_software_info(serial)
+            
+            for sw in software_info.get("versions", []):
+                if sw.get("version") == version and sw.get("downloaded", "no").lower() == "yes":
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.warning(f"Could not check if {version} is downloaded on {serial}: {e}")
+            # If we can't check, assume not downloaded and proceed with download
+            return False
     
     def _init_device_status(self, serial: str, job_id: str) -> DeviceStatus:
         """Initialize device status."""
