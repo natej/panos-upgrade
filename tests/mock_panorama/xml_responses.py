@@ -177,10 +177,16 @@ def create_arp_table_response(arp_entries: List[Dict]) -> str:
 
 def create_disk_space_response(available_gb: float) -> str:
     """
-    Create disk space response XML.
+    Create disk space response XML matching real PAN-OS format.
+    
+    Real PAN-OS returns df-like output as text content:
+    Filesystem      Size  Used Avail Use% Mounted on
+    /dev/sda2       5.1G  1.1G  3.7G  23% /
+    /dev/sda5       7.6G  4.0G  3.3G  55% /opt/pancfg
+    /dev/sda6        17G  7.5G  8.6G  47% /opt/panlogs
     
     Args:
-        available_gb: Available disk space in GB
+        available_gb: Available disk space in GB (for /opt/pancfg)
         
     Returns:
         XML string
@@ -188,8 +194,18 @@ def create_disk_space_response(available_gb: float) -> str:
     response = create_response("success")
     result = ET.SubElement(response, "result")
     
-    available = ET.SubElement(result, "available")
-    available.text = f"{available_gb:.1f}G"
+    # Create realistic df-like output
+    # Software downloads go to /opt/pancfg, so that's the partition to report
+    used_gb = max(1.0, 7.6 - available_gb)  # Simulate some used space
+    total_gb = 7.6
+    use_percent = int((used_gb / total_gb) * 100)
+    
+    df_output = f"""Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2       5.1G  1.1G  3.7G  23% /
+/dev/sda5       {total_gb:.1f}G  {used_gb:.1f}G  {available_gb:.1f}G  {use_percent}% /opt/pancfg
+/dev/sda6        17G  7.5G  8.6G  47% /opt/panlogs"""
+    
+    result.text = df_output
     
     return ET.tostring(response, encoding="unicode")
 

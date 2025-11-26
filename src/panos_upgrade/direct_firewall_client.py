@@ -77,7 +77,7 @@ class DirectFirewallClient:
     
     def check_disk_space(self) -> float:
         """
-        Check available disk space.
+        Check available disk space on /opt/pancfg (where software downloads go).
         
         Returns:
             Available disk space in GB
@@ -89,22 +89,89 @@ class DirectFirewallClient:
             result = self._op_command(cmd)
             
             if result is not None:
-                avail_text = result.findtext('.//available', '0')
-                try:
-                    if 'G' in avail_text:
-                        return float(avail_text.replace('G', ''))
-                    elif 'M' in avail_text:
-                        return float(avail_text.replace('M', '')) / 1024
-                    else:
-                        return float(avail_text) / (1024 * 1024)
-                except (ValueError, AttributeError):
-                    return 0.0
+                # PAN-OS returns df-like output as text content
+                # Example: "/dev/sda5   7.6G  4.0G  3.3G   55% /opt/pancfg"
+                text_output = result.text or ""
+                if not text_output:
+                    # Try to get text from child elements
+                    text_output = "".join(result.itertext())
+                
+                self.logger.debug(f"Disk space output: {text_output[:500]}")
+                
+                # Parse the df-like output - look for /opt/pancfg partition
+                # where software images are downloaded
+                available_gb = self._parse_disk_space_output(text_output)
+                self.logger.debug(f"Parsed available disk space: {available_gb} GB")
+                return available_gb
             
             return 0.0
             
         except Exception as e:
             self.logger.error(f"Failed to check disk space on {self.mgmt_ip}: {e}")
             raise
+    
+    def _parse_disk_space_output(self, text_output: str) -> float:
+        """
+        Parse df-like disk space output from PAN-OS.
+        
+        Looks for /opt/pancfg partition first (where software downloads),
+        then falls back to root partition.
+        
+        Example output line:
+        /dev/sda5     7.6G  4.0G  3.3G   55% /opt/pancfg
+        
+        Args:
+            text_output: Raw text from disk-space command
+            
+        Returns:
+            Available disk space in GB
+        """
+        import re
+        
+        lines = text_output.strip().split('\n')
+        
+        # Priority order: /opt/pancfg (software downloads), then root /
+        target_mounts = ['/opt/pancfg', '/']
+        
+        for target_mount in target_mounts:
+            for line in lines:
+                # Skip header line
+                if line.startswith('Filesystem') or not line.strip():
+                    continue
+                
+                # Check if this line is for our target mount
+                if target_mount == '/' and not line.rstrip().endswith(' /'):
+                    if target_mount not in line:
+                        continue
+                elif target_mount != '/' and target_mount not in line:
+                    continue
+                
+                # Parse the line: Filesystem Size Used Avail Use% Mounted
+                # Example: /dev/sda5     7.6G  4.0G  3.3G   55% /opt/pancfg
+                parts = line.split()
+                if len(parts) >= 4:
+                    avail_str = parts[3]  # Available column
+                    
+                    # Parse size with unit suffix
+                    match = re.match(r'([\d.]+)([GMKT]?)', avail_str)
+                    if match:
+                        value = float(match.group(1))
+                        unit = match.group(2).upper() if match.group(2) else ''
+                        
+                        if unit == 'G':
+                            return value
+                        elif unit == 'M':
+                            return value / 1024
+                        elif unit == 'T':
+                            return value * 1024
+                        elif unit == 'K':
+                            return value / (1024 * 1024)
+                        else:
+                            # Assume bytes
+                            return value / (1024 * 1024 * 1024)
+        
+        self.logger.warning(f"Could not parse disk space from output: {text_output[:200]}")
+        return 0.0
     
     def download_software(self, version: str) -> bool:
         """
