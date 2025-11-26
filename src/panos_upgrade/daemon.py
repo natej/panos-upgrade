@@ -96,7 +96,8 @@ class UpgradeDaemon:
         self.device_inventory = DeviceInventory(inventory_file, self.panorama_client)
         
         # Initialize hash manager
-        hash_file = self.config.get("paths.version_hashes", str(constants.DEFAULT_VERSION_HASHES_FILE))
+        default_hash_file = self.config.work_dir / constants.CONFIG_SUBDIR / constants.VERSION_HASHES_FILE_NAME
+        hash_file = self.config.get("paths.version_hashes", str(default_hash_file))
         self.hash_manager = HashManager(Path(hash_file))
         
         # Initialize upgrade manager

@@ -7,28 +7,35 @@ from pathlib import Path
 from panos_upgrade import __version__
 from panos_upgrade.config import get_config
 from panos_upgrade.logging_config import setup_logging, get_logger
+from panos_upgrade.work_dir_resolver import resolve_work_dir, ENV_VAR_NAME
 
 
 @click.group()
 @click.version_option(version=__version__)
-@click.option('--work-dir', type=click.Path(), help='Working directory')
-@click.option('--config-file', type=click.Path(), help='Configuration file path')
+@click.option('--work-dir', type=click.Path(), 
+              help=f'Working directory. Priority: CLI flag > {ENV_VAR_NAME} env var > ~/.panos-upgrade.config.json > /opt/panos-upgrade')
 @click.pass_context
-def main(ctx, work_dir, config_file):
+def main(ctx, work_dir):
     """PAN-OS Upgrade Manager - Advanced device upgrade orchestration."""
     ctx.ensure_object(dict)
     
-    # Initialize configuration
-    work_dir_path = Path(work_dir) if work_dir else None
-    config_file_path = Path(config_file) if config_file else None
-    config = get_config(config_file=config_file_path, work_dir=work_dir_path)
+    # Resolve work directory with source tracking
+    resolution = resolve_work_dir(cli_work_dir=work_dir)
+    
+    # Initialize configuration with resolved work directory
+    config = get_config(work_dir=resolution.path)
     ctx.obj['config'] = config
+    ctx.obj['work_dir_resolution'] = resolution
     
     # Initialize logging
     log_dir = config.get_path("logs")
     log_level = config.get("logging.level", "INFO")
     logger = setup_logging(log_dir, log_level, console_output=True)
     ctx.obj['logger'] = logger
+    
+    # Log the work directory source at INFO level (always visible)
+    logger.info(resolution.log_message())
+    logger.info(f"Configuration loaded: {config.config_file}")
 
 
 # ============================================================================

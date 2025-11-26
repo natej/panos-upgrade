@@ -71,17 +71,30 @@ pip install -e .
 ### 2. Initialize System
 
 ```bash
-# Run initialization script
-python scripts/init_system.py
+# For development/testing - initialize in home directory
+python scripts/init_system.py --work-dir ~/opt/panosupgrade
+
+# For production - initialize with default path (may require sudo)
+sudo python scripts/init_system.py
 ```
 
+The initialization script:
+1. Creates the work directory structure
+2. Writes `~/.panos-upgrade.config.json` to remember the work directory
+
+**Work Directory Resolution Priority:**
+1. CLI flag: `--work-dir`
+2. Environment variable: `PANOS_UPGRADE_HOME`
+3. User config file: `~/.panos-upgrade.config.json`
+4. Default: `/opt/panos-upgrade`
+
 This creates the directory structure:
-- `/var/lib/panos-upgrade/config/` - Configuration files
-- `/var/lib/panos-upgrade/queue/` - Job queue directories
-- `/var/lib/panos-upgrade/status/` - Status tracking
-- `/var/lib/panos-upgrade/logs/` - Log files
-- `/var/lib/panos-upgrade/validation/` - Validation results
-- `/var/lib/panos-upgrade/commands/` - Command queue
+- `{work_dir}/config/` - Configuration files
+- `{work_dir}/queue/` - Job queue directories
+- `{work_dir}/status/` - Status tracking
+- `{work_dir}/logs/` - Log files
+- `{work_dir}/validation/` - Validation results
+- `{work_dir}/commands/` - Command queue
 
 ### 3. Configure
 
@@ -102,10 +115,13 @@ panos-upgrade config set panorama.rate_limit 10
 Copy the example and customize:
 
 ```bash
-cp examples/upgrade_paths.json /var/lib/panos-upgrade/config/
+# Use your configured work directory
+cp examples/upgrade_paths.json ~/opt/panosupgrade/config/
+# OR for production
+cp examples/upgrade_paths.json /opt/panos-upgrade/config/
 ```
 
-Edit `/var/lib/panos-upgrade/config/upgrade_paths.json`:
+Edit `{work_dir}/config/upgrade_paths.json`:
 
 ```json
 {
@@ -152,8 +168,8 @@ panos-upgrade job list
 # Check device status
 panos-upgrade device status 001234567890
 
-# View logs
-tail -f /var/lib/panos-upgrade/logs/text/panos-upgrade-*.log
+# View logs (use your configured work directory)
+tail -f ~/opt/panosupgrade/logs/text/panos-upgrade-*.log
 ```
 
 ### Cancel an Upgrade
@@ -190,7 +206,7 @@ panos-upgrade device metrics 001234567890
 
 **Submit Job from Web App:**
 
-Create file in `/var/lib/panos-upgrade/queue/pending/`:
+Create file in `{work_dir}/queue/pending/`:
 
 ```json
 {
@@ -206,19 +222,25 @@ Create file in `/var/lib/panos-upgrade/queue/pending/`:
 
 ```python
 import json
+from pathlib import Path
+
+# Get work_dir from ~/.panos-upgrade.config.json
+user_config = Path.home() / ".panos-upgrade.config.json"
+with open(user_config) as f:
+    work_dir = Path(json.load(f)["work_dir"])
 
 # Read daemon status
-with open('/var/lib/panos-upgrade/status/daemon.json') as f:
+with open(work_dir / "status/daemon.json") as f:
     daemon_status = json.load(f)
 
 # Read device status
-with open('/var/lib/panos-upgrade/status/devices/001234567890.json') as f:
+with open(work_dir / "status/devices/001234567890.json") as f:
     device_status = json.load(f)
 ```
 
 **Cancel from Web App:**
 
-Create file in `/var/lib/panos-upgrade/commands/incoming/`:
+Create file in `{work_dir}/commands/incoming/`:
 
 ```json
 {
@@ -231,6 +253,32 @@ Create file in `/var/lib/panos-upgrade/commands/incoming/`:
 ```
 
 ## Configuration Reference
+
+### Work Directory
+
+The work directory can be configured via multiple sources (in priority order):
+
+| Source | Example |
+|--------|---------|
+| CLI flag | `panos-upgrade --work-dir ~/opt/panosupgrade daemon start` |
+| Environment variable | `export PANOS_UPGRADE_HOME=~/opt/panosupgrade` |
+| User config file | `~/.panos-upgrade.config.json` |
+| Default | `/opt/panos-upgrade` |
+
+The user config file (`~/.panos-upgrade.config.json`) is created automatically by `init_system.py`:
+
+```json
+{
+  "work_dir": "/home/user/opt/panosupgrade",
+  "created_at": "2025-11-26T10:00:00Z",
+  "created_by": "panos-upgrade init"
+}
+```
+
+Every command logs which source was used at INFO level:
+```
+2025-11-26 10:00:00 - panos_upgrade - INFO - Work directory: /home/user/opt/panosupgrade (from ~/.panos-upgrade.config.json)
+```
 
 ### Panorama Settings
 - `panorama.host` - Panorama hostname
@@ -308,7 +356,11 @@ Create file in `/var/lib/panos-upgrade/commands/incoming/`:
 
 ### Daemon Won't Start
 **Cause**: Permission issues or missing directories  
-**Solution**: Run `python scripts/init_system.py` and check permissions
+**Solution**: Run `python scripts/init_system.py --work-dir YOUR_PATH` and check permissions
+
+### Wrong Work Directory
+**Cause**: Multiple configuration sources or stale user config  
+**Solution**: Check log output for "Work directory: ... (from ...)" message. Update `~/.panos-upgrade.config.json` or use `--work-dir` flag to override.
 
 ## Development
 
@@ -324,15 +376,20 @@ panos-upgrade/
 │   ├── panorama_client.py     # Panorama API client
 │   ├── validation.py          # Validation system
 │   ├── config.py              # Configuration management
+│   ├── work_dir_resolver.py   # Work directory resolution
 │   ├── logging_config.py      # Logging system
 │   ├── models.py              # Data models
 │   ├── constants.py           # Constants
+│   ├── device_inventory.py    # Device discovery/inventory
+│   ├── direct_firewall_client.py  # Direct firewall connections
+│   ├── hash_manager.py        # Software hash verification
+│   ├── exceptions.py          # Custom exceptions
 │   └── utils/
 │       └── file_ops.py        # File operations
 ├── examples/                  # Example configurations
 ├── docs/                      # Documentation
 ├── scripts/                   # Utility scripts
-└── tests/                     # Test suite (future)
+└── tests/                     # Test suite (including mock Panorama)
 ```
 
 ### Running from Source

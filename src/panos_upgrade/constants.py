@@ -3,12 +3,17 @@
 import os
 from pathlib import Path
 
-# Default paths
-DEFAULT_WORK_DIR = Path("/opt/panosupgrade")
-DEFAULT_CONFIG_FILE = DEFAULT_WORK_DIR / "config" / "config.json"
-DEFAULT_UPGRADE_PATHS_FILE = DEFAULT_WORK_DIR / "config" / "upgrade_paths.json"
-DEFAULT_VERSION_HASHES_FILE = DEFAULT_WORK_DIR / "config" / "version_hashes.json"
-DEFAULT_DEVICE_INVENTORY_FILE = DEFAULT_WORK_DIR / "devices" / "inventory.json"
+# Default work directory (used as fallback when no other source specifies it)
+# Priority order: CLI flag > ENV var > ~/.panos-upgrade.config.json > this default
+DEFAULT_WORK_DIR = Path("/opt/panos-upgrade")
+
+# Note: These are relative paths within work_dir, not absolute paths
+# The actual paths are constructed at runtime based on resolved work_dir
+CONFIG_SUBDIR = "config"
+CONFIG_FILE_NAME = "config.json"
+UPGRADE_PATHS_FILE_NAME = "upgrade_paths.json"
+VERSION_HASHES_FILE_NAME = "version_hashes.json"
+DEVICE_INVENTORY_FILE_NAME = "inventory.json"
 
 # Directory structure
 DIR_CONFIG = "config"

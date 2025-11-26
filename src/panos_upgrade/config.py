@@ -16,11 +16,19 @@ class Config:
         Initialize configuration.
         
         Args:
-            config_file: Path to config file (default: /var/lib/panos-upgrade/config/config.json)
-            work_dir: Working directory (default: /var/lib/panos-upgrade)
+            config_file: Path to config file (if not provided, uses work_dir/config/config.json)
+            work_dir: Working directory (should be resolved via work_dir_resolver before calling)
         """
+        # Work dir should be provided (resolved by CLI or caller)
+        # Fall back to default only as last resort
         self.work_dir = Path(work_dir) if work_dir else constants.DEFAULT_WORK_DIR
-        self.config_file = Path(config_file) if config_file else constants.DEFAULT_CONFIG_FILE
+        
+        # Config file is relative to work_dir unless explicitly provided
+        if config_file:
+            self.config_file = Path(config_file)
+        else:
+            self.config_file = self.work_dir / constants.CONFIG_SUBDIR / constants.CONFIG_FILE_NAME
+        
         self._config: Dict[str, Any] = {}
         self._load_config()
     
@@ -175,7 +183,8 @@ class Config:
     @property
     def upgrade_paths_file(self) -> Path:
         """Get upgrade paths file path."""
-        return Path(self.get("paths.upgrade_paths", str(constants.DEFAULT_UPGRADE_PATHS_FILE)))
+        default_path = self.work_dir / constants.CONFIG_SUBDIR / constants.UPGRADE_PATHS_FILE_NAME
+        return Path(self.get("paths.upgrade_paths", str(default_path)))
     
     @property
     def firewall_username(self) -> str:

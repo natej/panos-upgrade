@@ -19,6 +19,8 @@
     "route_margin": 0.0,
     "arp_margin": 0.0,
     "min_disk_gb": 5.0,
+    "verify_hashes": true,
+    "fail_on_missing_hash": true,
     "custom_metrics": []
   },
   "logging": {
@@ -27,9 +29,9 @@
     "retention_days": 30
   },
   "paths": {
-    "upgrade_paths": "/var/lib/panos-upgrade/config/upgrade_paths.json",
-    "version_hashes": "/var/lib/panos-upgrade/config/version_hashes.json",
-    "work_dir": "/var/lib/panos-upgrade"
+    "work_dir": "/opt/panos-upgrade",
+    "upgrade_paths": "/opt/panos-upgrade/config/upgrade_paths.json",
+    "version_hashes": "/opt/panos-upgrade/config/version_hashes.json"
   }
 }
 
