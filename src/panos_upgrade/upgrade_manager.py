@@ -639,6 +639,13 @@ class UpgradeManager:
                 disk_space_gb = firewall_client.check_disk_space()
                 min_disk_gb = self.config.min_disk_gb
                 
+                # Store disk space info in device status
+                device_status.disk_space = DiskSpaceInfo(
+                    available_gb=disk_space_gb,
+                    required_gb=min_disk_gb,
+                    check_passed=disk_space_gb >= min_disk_gb
+                )
+                
                 if disk_space_gb < min_disk_gb:
                     msg = f"Insufficient disk space: {disk_space_gb:.2f} GB available, {min_disk_gb:.2f} GB required"
                     self.logger.error(msg, extra={'serial': serial})
