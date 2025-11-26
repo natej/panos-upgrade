@@ -12,7 +12,7 @@ Download-only mode allows you to pre-stage PAN-OS software images on firewalls w
 ## Key Features
 
 ✅ **Direct Firewall Connections** - Downloads bypass Panorama  
-✅ **Hash Verification** - Validates download integrity with SHA256  
+✅ **Smart Skip Detection** - Automatically skips already-downloaded versions  
 ✅ **Bulk Queueing** - Queue all 230+ devices with one command  
 ✅ **Disk Space Validation** - Pre-checks before downloading  
 ✅ **Progress Tracking** - Monitor downloads across all devices  
@@ -51,12 +51,10 @@ CLI → Daemon → Panorama (device discovery only)
    └─ Load device info from inventory
    └─ Connect directly to firewall mgmt_ip
    └─ Check disk space
+   └─ Check for already-downloaded versions
    └─ For each version in upgrade path:
-      ├─ Download software
-      ├─ Wait for completion
-      ├─ Query firewall for file hash
-      ├─ Verify hash against expected
-      └─ Store verified hash
+      ├─ Skip if already downloaded
+      └─ Download if not present
    └─ Mark as download_complete
 
 4. Later: Normal Upgrade
@@ -66,40 +64,13 @@ CLI → Daemon → Panorama (device discovery only)
 
 ## Setup
 
-### 1. Configure Hash Database
+### Configure Firewall Credentials
 
-Copy the example and customize with official PAN-OS hashes:
-
-```bash
-cp examples/version_hashes.json /var/lib/panos-upgrade/config/
-```
-
-Edit `/var/lib/panos-upgrade/config/version_hashes.json`:
-
-```json
-{
-  "10.1.0": {
-    "sha256": "OFFICIAL_SHA256_HASH_FROM_PALO_ALTO",
-    "filename": "PanOS_3200-10.1.0",
-    "size_mb": 460,
-    "release_date": "2023-06-20"
-  }
-}
-```
-
-**Where to get official hashes:**
-- Palo Alto Networks support portal
-- Software release notes
-- Customer support
-
-### 2. Configure Hash Verification
+Download-only mode connects directly to firewalls using username/password:
 
 ```bash
-# Enable hash verification (default: true)
-panos-upgrade config set validation.verify_hashes true
-
-# Fail if hash not in database (default: false)
-panos-upgrade config set validation.fail_on_missing_hash false
+panos-upgrade config set firewall.username admin
+panos-upgrade config set firewall.password YOUR_PASSWORD
 ```
 
 ## Usage
@@ -119,7 +90,7 @@ Discovering devices from Panorama...
   New devices: 230
   Updated devices: 0
 
-Inventory saved to: /var/lib/panos-upgrade/devices/inventory.json
+Inventory saved to: /opt/panos-upgrade/devices/inventory.json
 ```
 
 ### Step 2: Queue All Devices for Download
@@ -189,18 +160,9 @@ panos-upgrade device status 001234567890
 {
   "serial": "001234567890",
   "upgrade_status": "download_complete",
-  "upgrade_message": "Downloaded and verified versions: 10.1.0, 10.5.1, 11.1.0",
-  "downloaded_versions": ["10.1.0", "10.5.1", "11.1.0"],
-  "version_hashes": {
-    "10.1.0": "b2c3d4e5f6a7b8c9...",
-    "10.5.1": "c3d4e5f6a7b8c9d0...",
-    "11.1.0": "f6a7b8c9d0e1f2a3..."
-  },
-  "hash_verification": {
-    "10.1.0": "passed",
-    "10.5.1": "passed",
-    "11.1.0": "passed"
-  },
+  "upgrade_message": "Downloaded 2 version(s): 10.5.1, 11.1.0. Skipped 1 (already present): 10.1.0",
+  "downloaded_versions": ["10.5.1", "11.1.0"],
+  "skipped_versions": ["10.1.0"],
   "ready_for_install": true
 }
 ```
@@ -217,54 +179,30 @@ panos-upgrade job submit --device 001234567890 --download-only
 panos-upgrade job submit --device 001234567890 --download-only --dry-run
 ```
 
-## Hash Verification
+## Smart Skip Detection
 
-### How It Works
+When you run download-only mode, the system automatically:
 
-1. **Download completes** on firewall
-2. **Query firewall** for software info: `show system software info`
-3. **Extract SHA256** from firewall response
-4. **Load expected hash** from `version_hashes.json`
-5. **Compare hashes** - Must match exactly
-6. **Log result** - Pass or fail with details
-7. **Store hash** in device status for audit trail
+1. **Queries the firewall** for existing software versions
+2. **Identifies already-downloaded** versions
+3. **Skips downloads** for versions already present
+4. **Tracks separately** what was downloaded vs skipped
 
-### Verification Modes
+### Example: Re-running After Partial Download
 
-**Strict Mode** (fail if hash not in database):
-```bash
-panos-upgrade config set validation.fail_on_missing_hash true
+If a previous download was interrupted or you're running queue-all again:
+
+**First run:**
+```
+Downloaded 3 version(s): 10.1.0, 10.5.1, 11.1.0
 ```
 
-**Lenient Mode** (warn if hash not in database):
-```bash
-panos-upgrade config set validation.fail_on_missing_hash false
+**Second run (same device):**
+```
+All 3 version(s) already downloaded: 10.1.0, 10.5.1, 11.1.0
 ```
 
-### Hash Mismatch Handling
-
-If hash doesn't match:
-```
-2025-11-23 12:05:03 - ERROR - Hash verification FAILED for 10.1.0
-2025-11-23 12:05:03 - ERROR - Expected: b2c3d4e5f6a7b8c9...
-2025-11-23 12:05:03 - ERROR - Actual:   XXXXXXXXXXXXXXXX...
-2025-11-23 12:05:03 - ERROR - Download may be corrupted or tampered!
-2025-11-23 12:05:03 - ERROR - Upgrade aborted for security reasons
-```
-
-Device status:
-```json
-{
-  "upgrade_status": "failed",
-  "errors": [
-    {
-      "phase": "download",
-      "message": "Hash verification failed for 10.1.0",
-      "details": "Expected: b2c3..., Actual: XXXX..."
-    }
-  ]
-}
-```
+The job completes successfully without re-downloading.
 
 ## Conflict Detection
 
@@ -326,7 +264,7 @@ Shows:
 - Current download phase
 - Progress percentage
 - Downloaded versions list
-- Hash verification results
+- Skipped versions list
 - Ready for install flag
 
 ## Logs
@@ -337,26 +275,28 @@ Shows:
 2025-11-23 12:00:00 - INFO - Starting download-only for device 001234567890
 2025-11-23 12:00:01 - INFO - Connecting directly to firewall: 10.1.1.10
 2025-11-23 12:00:02 - INFO - Disk space check passed: 15.50 GB available
-2025-11-23 12:00:03 - INFO - Downloading version 10.1.0 (1/3)
-2025-11-23 12:00:03 - INFO - Downloading version 10.1.0 to 10.1.1.10
-2025-11-23 12:00:13 - INFO - Download completed for 10.1.0 on 10.1.1.10
-2025-11-23 12:00:14 - INFO - Verifying download integrity for 10.1.0
-2025-11-23 12:00:15 - INFO - Retrieved hash for 10.1.0: b2c3d4e5f6a7b8c9...
-2025-11-23 12:00:15 - INFO - Hash verification passed for version 10.1.0
-2025-11-23 12:00:15 - INFO - Downloaded and verified 10.1.0
-2025-11-23 12:00:16 - INFO - Downloading version 10.5.1 (2/3)
-...
-2025-11-23 12:00:45 - INFO - Download complete for 001234567890: 10.1.0, 10.5.1, 11.1.0
+2025-11-23 12:00:03 - INFO - Found 1 version(s) already downloaded on 001234567890: 10.1.0
+2025-11-23 12:00:03 - INFO - Version 10.1.0 already downloaded on 001234567890, skipping
+2025-11-23 12:00:04 - INFO - Downloading version 10.5.1 (2/3)
+2025-11-23 12:00:14 - INFO - Download completed for 10.5.1 on 10.1.1.10
+2025-11-23 12:00:15 - INFO - Downloaded 10.5.1
+2025-11-23 12:00:16 - INFO - Downloading version 11.1.0 (3/3)
+2025-11-23 12:00:26 - INFO - Download completed for 11.1.0 on 10.1.1.10
+2025-11-23 12:00:27 - INFO - Downloaded 11.1.0
+2025-11-23 12:00:27 - INFO - Download complete for 001234567890: 2 downloaded, 1 skipped (already present)
 ```
 
-### Hash Verification Failure
+### All Versions Already Present
 
 ```
-2025-11-23 12:00:15 - ERROR - Hash mismatch for 10.1.0: HashMismatchError(...)
-2025-11-23 12:00:15 - ERROR - Expected: b2c3d4e5f6a7b8c9...
-2025-11-23 12:00:15 - ERROR - Actual:   XXXXXXXXXXXXXXXX...
-2025-11-23 12:00:15 - ERROR - Download may be corrupted or tampered!
-2025-11-23 12:00:15 - ERROR - Download error for 001234567890: Hash verification failed
+2025-11-23 12:00:00 - INFO - Starting download-only for device 001234567890
+2025-11-23 12:00:01 - INFO - Connecting directly to firewall: 10.1.1.10
+2025-11-23 12:00:02 - INFO - Disk space check passed: 15.50 GB available
+2025-11-23 12:00:03 - INFO - Found 3 version(s) already downloaded on 001234567890: 10.1.0, 10.5.1, 11.1.0
+2025-11-23 12:00:03 - INFO - Version 10.1.0 already downloaded on 001234567890, skipping
+2025-11-23 12:00:03 - INFO - Version 10.5.1 already downloaded on 001234567890, skipping
+2025-11-23 12:00:03 - INFO - Version 11.1.0 already downloaded on 001234567890, skipping
+2025-11-23 12:00:03 - INFO - Download complete for 001234567890: all versions already present
 ```
 
 ## Best Practices
@@ -383,15 +323,11 @@ panos-upgrade download queue-all --dry-run
 watch -n 10 'panos-upgrade download status'
 ```
 
-### 4. Verify Hashes
-
-Ensure `version_hashes.json` contains official hashes from Palo Alto Networks.
-
-### 5. Check Disk Space
+### 4. Check Disk Space
 
 Devices need space for all versions in upgrade path (typically 2-3 GB per version).
 
-### 6. Stagger Downloads
+### 5. Stagger Downloads
 
 Use worker configuration to control concurrent downloads:
 
@@ -423,36 +359,6 @@ Error: No management IP for device 001234567890
 
 **Solution:** Check Panorama - device might not have management IP configured
 
-### Hash Not Found
-
-```
-WARNING: No expected hash for version 10.1.0, accepting firewall hash
-```
-
-**Solution:** Add hash to `version_hashes.json`:
-```bash
-# Manually add (future enhancement: CLI command)
-# Edit /var/lib/panos-upgrade/config/version_hashes.json
-```
-
-### Hash Mismatch
-
-```
-ERROR: Hash verification FAILED for 10.1.0
-```
-
-**Possible causes:**
-- Corrupted download
-- Network issue
-- Wrong hash in database
-- Tampering (security concern)
-
-**Solution:**
-1. Check logs for details
-2. Verify hash in `version_hashes.json` is correct
-3. Re-download if corrupted
-4. Investigate if tampering suspected
-
 ### Connection Failed
 
 ```
@@ -462,8 +368,18 @@ ERROR: Failed to connect to firewall 10.1.1.10
 **Solution:**
 - Verify firewall management IP is reachable
 - Check firewall API is enabled
-- Verify API key is correct
-- Check firewall firewall rules
+- Verify credentials are correct
+- Check firewall rules
+
+### Insufficient Disk Space
+
+```
+ERROR: Insufficient disk space: 1.50 GB available, 5.00 GB required
+```
+
+**Solution:**
+- Free up space on firewall
+- Adjust `validation.min_disk_gb` setting
 
 ## Advanced Usage
 
@@ -519,27 +435,15 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
     "host": "panorama.example.com",
     "api_key": "YOUR_API_KEY"
   },
+  "firewall": {
+    "username": "admin",
+    "password": "YOUR_PASSWORD"
+  },
   "validation": {
-    "min_disk_gb": 5.0,
-    "verify_hashes": true,
-    "fail_on_missing_hash": false
+    "min_disk_gb": 5.0
   },
   "paths": {
-    "upgrade_paths": "/var/lib/panos-upgrade/config/upgrade_paths.json",
-    "version_hashes": "/var/lib/panos-upgrade/config/version_hashes.json"
-  }
-}
-```
-
-### Hash Database Format
-
-```json
-{
-  "10.1.0": {
-    "sha256": "FULL_64_CHARACTER_SHA256_HASH",
-    "filename": "PanOS_3200-10.1.0",
-    "size_mb": 460,
-    "release_date": "2023-06-20"
+    "upgrade_paths": "/opt/panos-upgrade/config/upgrade_paths.json"
   }
 }
 ```
@@ -564,12 +468,12 @@ atomic_write_json(pending_dir / f"{job_id}.json", job_data)
 ### Check Download Status
 
 ```python
-status = read_json(f"/var/lib/panos-upgrade/status/devices/001234567890.json")
+status = read_json(f"/opt/panos-upgrade/status/devices/001234567890.json")
 
 if status["upgrade_status"] == "download_complete":
     print(f"Ready for install!")
     print(f"Downloaded: {', '.join(status['downloaded_versions'])}")
-    print(f"Hashes verified: {status['hash_verification']}")
+    print(f"Skipped: {', '.join(status['skipped_versions'])}")
 ```
 
 ## Complete Example
@@ -590,13 +494,11 @@ panos-upgrade download queue-all
 watch -n 10 'panos-upgrade download status'
 
 # Step 5: Wait for completion (check logs)
-tail -f /var/lib/panos-upgrade/logs/text/panos-upgrade-*.log
+tail -f /opt/panos-upgrade/logs/text/panos-upgrade-*.log
 
 # Step 6: Verify all complete
 panos-upgrade download status
 ```
-
-Expected time: ~10-15 minutes for 230 devices with 20 workers (assuming 10s download time in mock mode)
 
 ### Later: Perform Actual Upgrades
 
@@ -607,29 +509,6 @@ Once downloads are complete, perform normal upgrades (images already present):
 panos-upgrade job submit --device 001234567890
 ```
 
-## Security
-
-### Hash Verification Benefits
-
-1. **Integrity** - Detect corrupted downloads
-2. **Security** - Detect tampering
-3. **Compliance** - Audit trail of verified hashes
-4. **Trust** - Verify against official Palo Alto hashes
-
-### Audit Trail
-
-All hashes are logged:
-- JSON logs: `/var/lib/panos-upgrade/logs/structured/`
-- Text logs: `/var/lib/panos-upgrade/logs/text/`
-- Device status: `/var/lib/panos-upgrade/status/devices/`
-
-### Best Practices
-
-1. **Verify hash database** - Ensure hashes are from official source
-2. **Monitor logs** - Watch for hash mismatches
-3. **Investigate failures** - Hash mismatches may indicate security issues
-4. **Keep database updated** - Add hashes for new versions
-
 ## Comparison: Normal vs Download-Only
 
 | Feature | Normal Upgrade | Download-Only |
@@ -637,7 +516,7 @@ All hashes are logged:
 | Connection | Via Panorama | Direct to firewall |
 | Operations | Download + Install + Reboot | Download only |
 | Validation | Full (sessions, routes, ARP) | Disk space only |
-| Hash Check | Yes | Yes |
+| Skip Detection | No | Yes (skips existing) |
 | Duration | ~25 min per device | ~5 min per device |
 | Panorama Load | High | Low (discovery only) |
 | Use Case | Complete upgrade | Pre-staging |
@@ -647,8 +526,8 @@ All hashes are logged:
 **Q: Can I run download-only and normal upgrades at the same time?**  
 A: No, they are mutually exclusive per device to prevent conflicts.
 
-**Q: What happens if hash is not in database?**  
-A: By default, it logs a warning and accepts the firewall's hash. Set `fail_on_missing_hash: true` to fail instead.
+**Q: What happens if I run queue-all again?**  
+A: Already-downloaded versions are automatically skipped. Only missing versions are downloaded.
 
 **Q: Do I need to download again for normal upgrade?**  
 A: Future enhancement will detect pre-downloaded images. Currently, normal upgrade will re-download.
@@ -676,5 +555,4 @@ After successful downloads:
 - Bulk Queue: `panos-upgrade download queue-all`
 - Single Device: `panos-upgrade job submit --device SERIAL --download-only`
 - Monitor: `panos-upgrade download status`
-- Logs: `/var/lib/panos-upgrade/logs/`
-
+- Logs: `/opt/panos-upgrade/logs/`

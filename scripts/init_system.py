@@ -123,7 +123,7 @@ Examples:
         print(f"   The config file may have paths pointing to /opt/panos-upgrade")
         print(f"   but your work directory is: {work_dir}")
         print(f"   Edit: {config.config_file}")
-        print(f"   Update paths.work_dir, paths.upgrade_paths, paths.version_hashes")
+        print(f"   Update paths.work_dir and paths.upgrade_paths")
         print()
         print("4. Start the daemon:")
     else:

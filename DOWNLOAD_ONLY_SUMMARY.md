@@ -2,50 +2,40 @@
 
 ## What Was Implemented
 
-A complete download-only mode that allows pre-staging PAN-OS software images on 230+ firewalls with hash verification and bulk queueing.
+A complete download-only mode that allows pre-staging PAN-OS software images on 230+ firewalls with bulk queueing and smart skip detection.
 
-## New Components
+## Components
 
-### 1. **Hash Manager** (`hash_manager.py`)
-- Loads official PAN-OS SHA256 hashes from `version_hashes.json`
-- Verifies downloaded images against expected hashes
-- Supports strict and lenient verification modes
-- Provides hash database management
-
-### 2. **Device Inventory** (`device_inventory.py`)
+### 1. **Device Inventory** (`device_inventory.py`)
 - Queries Panorama for all connected devices
 - Extracts management IP addresses
 - Caches device information locally
 - Provides device lookup by serial
 
-### 3. **Direct Firewall Client** (`direct_firewall_client.py`)
+### 2. **Direct Firewall Client** (`direct_firewall_client.py`)
 - Connects directly to firewall management IPs
 - Bypasses Panorama for download operations
 - Checks disk space
 - Downloads software
-- Retrieves software info with hashes
+- Detects already-downloaded versions
 
-### 4. **Download-Only Workflow** (in `upgrade_manager.py`)
+### 3. **Download-Only Workflow** (in `upgrade_manager.py`)
 - `download_only_device()` method
-- Simplified workflow: disk check → download → verify → complete
+- Simplified workflow: disk check → check existing → download → complete
+- Skips already-downloaded versions automatically
 - No install, reboot, or full validation
-- Tracks downloaded versions and hashes
+- Tracks downloaded and skipped versions
 
-### 5. **Enhanced Models**
+### 4. **Enhanced Models**
 - Added `downloaded_versions` field
-- Added `version_hashes` dict
-- Added `hash_verification` dict
+- Added `skipped_versions` field (for already-present images)
 - Added `ready_for_install` flag
 - Added `download_only` job field
 
-### 6. **New Exceptions**
-- `HashError` - Base hash exception
-- `HashNotFoundError` - Hash not in database
-- `HashMismatchError` - Hash doesn't match expected
-- `DownloadVerificationError` - Verification failed
+### 5. **New Exceptions**
 - `ConflictingJobTypeError` - Job type conflict
 
-### 7. **CLI Commands**
+### 6. **CLI Commands**
 
 **Device Discovery:**
 ```bash
@@ -67,7 +57,7 @@ panos-upgrade job submit --device SERIAL --download-only [--dry-run]
 panos-upgrade download status
 ```
 
-### 8. **Enhanced Job Validation**
+### 7. **Enhanced Job Validation**
 - Checks for duplicate jobs (existing feature)
 - Checks for job type conflicts (new)
 - Prevents mixing download-only and normal upgrades
@@ -80,11 +70,11 @@ panos-upgrade download status
 - Reduces Panorama load
 - Faster downloads (no proxy overhead)
 
-### ✅ Hash Verification
-- SHA256 verification for every download
-- Detects corruption and tampering
-- Audit trail of verified hashes
-- Configurable strict/lenient modes
+### ✅ Smart Skip Detection
+- Detects already-downloaded versions
+- Skips downloads for existing images
+- Tracks what was downloaded vs skipped
+- Clear status messages
 
 ### ✅ Bulk Operations
 - Queue all 230+ devices with one command
@@ -101,7 +91,6 @@ panos-upgrade download status
 ### ✅ Progress Tracking
 - Device-level status
 - Overall download summary
-- Hash verification results
 - Ready-for-install flag
 
 ## Usage Flow
@@ -123,41 +112,19 @@ panos-upgrade download status
 panos-upgrade job submit --device 001234567890
 ```
 
-## Files Created/Modified
+## Files
 
-### New Files:
-- `src/panos_upgrade/hash_manager.py` - Hash verification
+### Source Files:
 - `src/panos_upgrade/device_inventory.py` - Device discovery
 - `src/panos_upgrade/direct_firewall_client.py` - Direct connections
-- `examples/version_hashes.json` - Example hash database
+- `src/panos_upgrade/upgrade_manager.py` - Download-only workflow
+- `src/panos_upgrade/cli.py` - CLI commands
+- `src/panos_upgrade/daemon.py` - Job handling
+
+### Documentation:
 - `docs/DOWNLOAD_ONLY_MODE.md` - Complete documentation
 
-### Modified Files:
-- `src/panos_upgrade/constants.py` - New constants
-- `src/panos_upgrade/models.py` - Hash tracking fields
-- `src/panos_upgrade/exceptions.py` - New exceptions
-- `src/panos_upgrade/upgrade_manager.py` - Download-only workflow
-- `src/panos_upgrade/cli.py` - New commands
-- `src/panos_upgrade/daemon.py` - Download-only job handling
-- `src/panos_upgrade/panorama_client.py` - Device discovery
-- `src/panos_upgrade/config.py` - Devices directory
-- `tests/mock_panorama/xml_responses.py` - New responses
-- `tests/mock_panorama/command_handlers.py` - New handlers
-- `tests/mock_panorama/scenarios/basic.yaml` - Hash data
-
 ## Configuration Files
-
-### version_hashes.json
-```json
-{
-  "10.1.0": {
-    "sha256": "OFFICIAL_HASH_FROM_PALO_ALTO",
-    "filename": "PanOS_3200-10.1.0",
-    "size_mb": 460,
-    "release_date": "2023-06-20"
-  }
-}
-```
 
 ### inventory.json (auto-generated)
 ```json
@@ -186,23 +153,18 @@ panos-upgrade job submit --device 001234567890
   "upgrade_message": "Downloading version 10.1.0 (1/3)",
   "progress": 30,
   "downloaded_versions": [],
-  "version_hashes": {}
+  "skipped_versions": []
 }
 ```
 
-### After Verification
+### After Download (with skipped)
 ```json
 {
   "upgrade_status": "downloading",
-  "upgrade_message": "Downloaded and verified 10.1.0",
+  "upgrade_message": "Version 10.1.0 already downloaded, skipping (1/3)",
   "progress": 40,
-  "downloaded_versions": ["10.1.0"],
-  "version_hashes": {
-    "10.1.0": "b2c3d4e5f6a7b8c9..."
-  },
-  "hash_verification": {
-    "10.1.0": "passed"
-  }
+  "downloaded_versions": [],
+  "skipped_versions": ["10.1.0"]
 }
 ```
 
@@ -210,19 +172,22 @@ panos-upgrade job submit --device 001234567890
 ```json
 {
   "upgrade_status": "download_complete",
-  "upgrade_message": "Downloaded and verified versions: 10.1.0, 10.5.1, 11.1.0",
+  "upgrade_message": "Downloaded 2 version(s): 10.5.1, 11.1.0. Skipped 1 (already present): 10.1.0",
   "progress": 100,
-  "downloaded_versions": ["10.1.0", "10.5.1", "11.1.0"],
-  "version_hashes": {
-    "10.1.0": "b2c3d4e5...",
-    "10.5.1": "c3d4e5f6...",
-    "11.1.0": "f6a7b8c9..."
-  },
-  "hash_verification": {
-    "10.1.0": "passed",
-    "10.5.1": "passed",
-    "11.1.0": "passed"
-  },
+  "downloaded_versions": ["10.5.1", "11.1.0"],
+  "skipped_versions": ["10.1.0"],
+  "ready_for_install": true
+}
+```
+
+### All Already Present
+```json
+{
+  "upgrade_status": "download_complete",
+  "upgrade_message": "All 3 version(s) already downloaded: 10.1.0, 10.5.1, 11.1.0",
+  "progress": 100,
+  "downloaded_versions": [],
+  "skipped_versions": ["10.1.0", "10.5.1", "11.1.0"],
   "ready_for_install": true
 }
 ```
@@ -234,11 +199,7 @@ panos-upgrade job submit --device 001234567890
 - **Flexible scheduling** - Download during business hours, upgrade during maintenance
 - **Reduced Panorama load** - Direct connections for downloads
 - **Bulk efficiency** - Queue 230+ devices with one command
-
-### Security
-- **Hash verification** - Detect corruption/tampering
-- **Audit trail** - Complete hash log
-- **Official hashes** - Verify against Palo Alto's published hashes
+- **Smart skipping** - Re-running queue-all skips already-downloaded images
 
 ### Reliability
 - **Pre-validation** - Check disk space before downloading
@@ -258,9 +219,6 @@ python -m tests.mock_panorama.server --config tests/mock_panorama/scenarios/basi
 panos-upgrade config set panorama.host localhost:8443
 panos-upgrade config set panorama.api_key test-api-key
 
-# Copy hash database
-cp examples/version_hashes.json /var/lib/panos-upgrade/config/
-
 # Test discovery
 panos-upgrade device discover
 
@@ -270,13 +228,11 @@ panos-upgrade job submit --device 001234567890 --download-only
 
 ## Production Deployment
 
-1. **Obtain official hashes** from Palo Alto Networks
-2. **Populate version_hashes.json** with real hashes
-3. **Discover devices** from production Panorama
-4. **Test with one device** first
-5. **Queue all devices** during business hours
-6. **Monitor completion**
-7. **Perform upgrades** during maintenance window
+1. **Discover devices** from production Panorama
+2. **Test with one device** first
+3. **Queue all devices** during business hours
+4. **Monitor completion**
+5. **Perform upgrades** during maintenance window
 
 ## Complete!
 

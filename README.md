@@ -382,7 +382,6 @@ panos-upgrade/
 │   ├── constants.py           # Constants
 │   ├── device_inventory.py    # Device discovery/inventory
 │   ├── direct_firewall_client.py  # Direct firewall connections
-│   ├── hash_manager.py        # Software hash verification
 │   ├── exceptions.py          # Custom exceptions
 │   └── utils/
 │       └── file_ops.py        # File operations
