@@ -223,7 +223,7 @@ class DirectFirewallClient:
     
     def get_software_info(self) -> Dict[str, Any]:
         """
-        Get software information including downloaded versions and hashes.
+        Get software information including downloaded versions.
         
         Returns:
             Dictionary with software information
@@ -231,7 +231,8 @@ class DirectFirewallClient:
         self.logger.debug(f"Getting software info from {self.mgmt_ip}")
         
         try:
-            cmd = "<show><system><software><info></info></software></system></show>"
+            # Use 'request system software info' to get available/downloaded versions
+            cmd = "<request><system><software><info></info></software></system></request>"
             result = self._op_command(cmd)
             
             versions = []

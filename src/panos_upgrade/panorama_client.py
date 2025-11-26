@@ -419,7 +419,8 @@ class PanoramaClient:
         self.logger.debug(f"Getting software info for {serial}")
         
         try:
-            cmd = "<show><system><software><info></info></software></system></show>"
+            # Use 'request system software info' to get available/downloaded versions
+            cmd = "<request><system><software><info></info></software></system></request>"
             result = self._op_command(cmd, serial=serial)
             
             versions = []
