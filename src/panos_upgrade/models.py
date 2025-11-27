@@ -1,7 +1,7 @@
 """Data models for status tracking."""
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from enum import Enum
 
@@ -132,7 +132,7 @@ class DeviceStatus:
     downloaded_versions: List[str] = field(default_factory=list)
     skipped_versions: List[str] = field(default_factory=list)  # Versions already present on device
     ready_for_install: bool = False
-    last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     skip_reason: str = ""
     errors: List[ErrorRecord] = field(default_factory=list)
     
@@ -147,13 +147,13 @@ class DeviceStatus:
     def add_error(self, phase: str, message: str, details: str = "") -> None:
         """Add an error record."""
         error = ErrorRecord(
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(timezone.utc).isoformat() + "Z",
             phase=phase,
             message=message,
             details=details
         )
         self.errors.append(error)
-        self.last_updated = datetime.utcnow().isoformat() + "Z"
+        self.last_updated = datetime.now(timezone.utc).isoformat() + "Z"
 
 
 @dataclass
@@ -165,7 +165,7 @@ class Job:
     ha_pair_name: str = ""
     dry_run: bool = False
     download_only: bool = False
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     started_at: str = ""
     completed_at: str = ""
     status: str = UpgradeStatus.PENDING.value
@@ -183,7 +183,7 @@ class CancelCommand:
     job_id: str = ""
     device_serial: str = ""
     reason: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -201,7 +201,7 @@ class DaemonStatus:
     failed_jobs: int
     cancelled_jobs: int
     started_at: str = ""
-    last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -215,7 +215,7 @@ class WorkerStatus:
     status: str  # "idle", "busy", "error"
     current_job_id: str = ""
     current_device: str = ""
-    last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    last_updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

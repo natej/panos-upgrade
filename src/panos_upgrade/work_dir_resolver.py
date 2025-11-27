@@ -71,13 +71,13 @@ def write_user_config(work_dir: Path) -> Path:
     Returns:
         Path to the created config file
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     
     user_config_path = get_user_config_path()
     
     config_data = {
         "work_dir": str(work_dir),
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
         "created_by": "panos-upgrade init"
     }
     

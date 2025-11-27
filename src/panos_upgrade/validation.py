@@ -1,6 +1,6 @@
 """Pre-flight and post-flight validation system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -132,7 +132,7 @@ class ValidationSystem:
             # Create validation result
             result = ValidationResult(
                 serial=serial,
-                timestamp=datetime.utcnow().isoformat() + "Z",
+                timestamp=datetime.now(timezone.utc).isoformat() + "Z",
                 pre_flight=pre_flight_metrics,
                 post_flight=post_flight_metrics,
                 comparison=comparison,
@@ -156,7 +156,7 @@ class ValidationSystem:
             # Create failed result
             result = ValidationResult(
                 serial=serial,
-                timestamp=datetime.utcnow().isoformat() + "Z",
+                timestamp=datetime.now(timezone.utc).isoformat() + "Z",
                 pre_flight=pre_flight_metrics,
                 validation_passed=False
             )
@@ -254,12 +254,12 @@ class ValidationSystem:
     def _save_pre_flight_metrics(self, serial: str, metrics: ValidationMetrics):
         """Save pre-flight metrics to file."""
         pre_flight_dir = self.config.get_path(constants.DIR_VALIDATION_PRE)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         file_path = pre_flight_dir / f"{serial}_{timestamp}.json"
         
         data = {
             "serial": serial,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "metrics": metrics.to_dict()
         }
         
@@ -269,7 +269,7 @@ class ValidationSystem:
     def _save_post_flight_validation(self, serial: str, result: ValidationResult):
         """Save post-flight validation result to file."""
         post_flight_dir = self.config.get_path(constants.DIR_VALIDATION_POST)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         file_path = post_flight_dir / f"{serial}_{timestamp}.json"
         
         atomic_write_json(file_path, result.to_dict())

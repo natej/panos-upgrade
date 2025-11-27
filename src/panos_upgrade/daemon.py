@@ -6,7 +6,7 @@ import sys
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
@@ -115,7 +115,7 @@ class UpgradeDaemon:
         self.logger.info("Starting PAN-OS upgrade daemon")
         self._running = True
         self._daemon_status.running = True
-        self._daemon_status.started_at = datetime.utcnow().isoformat() + "Z"
+        self._daemon_status.started_at = datetime.now(timezone.utc).isoformat() + "Z"
         
         # Start worker pool
         self.worker_pool.start(status_callback=self._worker_status_callback)
@@ -340,7 +340,7 @@ class UpgradeDaemon:
             self._daemon_status.active_jobs = len(list(active_dir.glob("*.json")))
             self._daemon_status.completed_jobs = len(list(completed_dir.glob("*.json")))
             self._daemon_status.cancelled_jobs = len(list(cancelled_dir.glob("*.json")))
-            self._daemon_status.last_updated = datetime.utcnow().isoformat() + "Z"
+            self._daemon_status.last_updated = datetime.now(timezone.utc).isoformat() + "Z"
     
     def _save_daemon_status(self):
         """Save daemon status to file."""
@@ -399,7 +399,7 @@ class UpgradeDaemon:
             from datetime import datetime
             
             job_data = read_json(dest_file)
-            job_data["completed_at"] = datetime.utcnow().isoformat() + "Z"
+            job_data["completed_at"] = datetime.now(timezone.utc).isoformat() + "Z"
             job_data["status"] = "complete" if success else "failed"
             atomic_write_json(dest_file, job_data)
             

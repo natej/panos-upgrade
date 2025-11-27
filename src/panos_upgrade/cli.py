@@ -160,7 +160,7 @@ def job():
 def submit(ctx, device, ha_pair, dry_run, download_only):
     """Submit an upgrade job."""
     import uuid
-    from datetime import datetime
+    from datetime import datetime, timezone
     from pathlib import Path
     from panos_upgrade.utils.file_ops import atomic_write_json, read_json
     from panos_upgrade import constants
@@ -219,7 +219,7 @@ def submit(ctx, device, ha_pair, dry_run, download_only):
             "ha_pair_name": "",
             "dry_run": dry_run,
             "download_only": download_only,
-            "created_at": datetime.utcnow().isoformat() + "Z"
+            "created_at": datetime.now(timezone.utc).isoformat() + "Z"
         }
     else:
         logger.info(f"Submitting job for HA pair {ha_pair}")
@@ -568,7 +568,7 @@ def download():
 def queue_all(ctx, dry_run):
     """Queue all discovered devices for download-only."""
     import uuid
-    from datetime import datetime
+    from datetime import datetime, timezone
     from panos_upgrade.device_inventory import DeviceInventory
     from panos_upgrade.panorama_client import PanoramaClient
     from panos_upgrade.utils.file_ops import atomic_write_json, safe_read_json
@@ -638,7 +638,7 @@ def queue_all(ctx, dry_run):
                         "ha_pair_name": "",
                         "dry_run": False,
                         "download_only": True,
-                        "created_at": datetime.utcnow().isoformat() + "Z"
+                        "created_at": datetime.now(timezone.utc).isoformat() + "Z"
                     }
                     
                     pending_dir = config.get_path(constants.DIR_QUEUE_PENDING)

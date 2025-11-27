@@ -1,6 +1,6 @@
 """Device inventory management."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -81,7 +81,7 @@ class DeviceInventory:
                     "mgmt_ip": device.get("ip_address", ""),
                     "current_version": device.get("sw_version", ""),
                     "model": device.get("model", ""),
-                    "discovered_at": datetime.utcnow().isoformat() + "Z"
+                    "discovered_at": datetime.now(timezone.utc).isoformat() + "Z"
                 }
             
             # Save inventory
@@ -102,7 +102,7 @@ class DeviceInventory:
         """Save inventory to file."""
         data = {
             "devices": self._inventory,
-            "last_updated": datetime.utcnow().isoformat() + "Z",
+            "last_updated": datetime.now(timezone.utc).isoformat() + "Z",
             "device_count": len(self._inventory)
         }
         
