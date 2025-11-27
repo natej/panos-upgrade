@@ -1,0 +1,10 @@
+<response status="success">
+  <result>
+    <num-active>{{total_sessions}}</num-active>
+    <num-tcp>{{tcp_sessions}}</num-tcp>
+    <num-udp>{{udp_sessions}}</num-udp>
+    <num-icmp>{{icmp_sessions}}</num-icmp>
+    <num-max>262144</num-max>
+  </result>
+</response>
+

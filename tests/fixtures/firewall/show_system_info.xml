@@ -1,0 +1,15 @@
+<response status="success">
+  <result>
+    <system>
+      <hostname>{{hostname}}</hostname>
+      <ip-address>{{ip_address}}</ip-address>
+      <serial>{{serial}}</serial>
+      <model>{{model}}</model>
+      <sw-version>{{version}}</sw-version>
+      <uptime>30 days, 12:34:56</uptime>
+      <family>vm</family>
+      <operational-mode>normal</operational-mode>
+    </system>
+  </result>
+</response>
+

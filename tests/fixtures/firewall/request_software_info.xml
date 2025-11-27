@@ -1,0 +1,26 @@
+<response status="success">
+  <result>
+    <sw-version>
+      <version>{{version_1}}</version>
+      <filename>PanOS_vm-{{version_1}}</filename>
+      <size>500M</size>
+      <downloaded>{{downloaded_1}}</downloaded>
+      <current>{{current_1}}</current>
+    </sw-version>
+    <sw-version>
+      <version>{{version_2}}</version>
+      <filename>PanOS_vm-{{version_2}}</filename>
+      <size>520M</size>
+      <downloaded>{{downloaded_2}}</downloaded>
+      <current>{{current_2}}</current>
+    </sw-version>
+    <sw-version>
+      <version>{{version_3}}</version>
+      <filename>PanOS_vm-{{version_3}}</filename>
+      <size>550M</size>
+      <downloaded>{{downloaded_3}}</downloaded>
+      <current>{{current_3}}</current>
+    </sw-version>
+  </result>
+</response>
+

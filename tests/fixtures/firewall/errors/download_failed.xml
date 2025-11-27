@@ -1,0 +1,6 @@
+<response status="error">
+  <msg>
+    <line>Failed to download software: {{error_message}}</line>
+  </msg>
+</response>
+

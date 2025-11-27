@@ -1,0 +1,6 @@
+<response status="error">
+  <msg>
+    <line>Invalid API key</line>
+  </msg>
+</response>
+

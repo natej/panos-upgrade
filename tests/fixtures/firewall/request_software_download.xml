@@ -1,0 +1,7 @@
+<response status="success">
+  <result>
+    <status>success</status>
+    <msg>Download job enqueued for version {{version}}</msg>
+  </result>
+</response>
+

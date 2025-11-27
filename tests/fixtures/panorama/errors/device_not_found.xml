@@ -1,0 +1,6 @@
+<response status="error">
+  <msg>
+    <line>Device not found: {{serial}}</line>
+  </msg>
+</response>
+

@@ -12,7 +12,7 @@ from panos_upgrade.config import Config
 class DirectFirewallClient:
     """Client for direct firewall connections (not through Panorama)."""
     
-    def __init__(self, mgmt_ip: str, username: str, password: str, rate_limiter=None):
+    def __init__(self, mgmt_ip: str, username: str, password: str, rate_limiter=None, xapi=None):
         """
         Initialize direct firewall client.
         
@@ -21,13 +21,14 @@ class DirectFirewallClient:
             username: Username for authentication
             password: Password for authentication
             rate_limiter: Rate limiter instance (optional)
+            xapi: Optional PanXapi instance for dependency injection (testing)
         """
         self.mgmt_ip = mgmt_ip
         self.username = username
         self.password = password
         self.rate_limiter = rate_limiter
         self.logger = get_logger("panos_upgrade.direct_firewall")
-        self._xapi: Optional[PanXapi] = None
+        self._xapi: Optional[PanXapi] = xapi  # Allow injection for testing
     
     def _get_xapi(self) -> PanXapi:
         """Get or create PanXapi instance."""
@@ -140,10 +141,8 @@ class DirectFirewallClient:
                     continue
                 
                 # Check if this line is for our target mount
-                if target_mount == '/' and not line.rstrip().endswith(' /'):
-                    if target_mount not in line:
-                        continue
-                elif target_mount != '/' and target_mount not in line:
+                # Must match exactly at end of line to avoid matching /opt/panrepo_backup for /opt/panrepo
+                if not line.rstrip().endswith(' ' + target_mount):
                     continue
                 
                 # Parse the line: Filesystem Size Used Avail Use% Mounted

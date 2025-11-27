@@ -1,0 +1,23 @@
+<response status="success">
+  <result>
+    <entry>
+      <ip>{{arp_1_ip}}</ip>
+      <mac>{{arp_1_mac}}</mac>
+      <interface>{{arp_1_interface}}</interface>
+      <status>c</status>
+    </entry>
+    <entry>
+      <ip>{{arp_2_ip}}</ip>
+      <mac>{{arp_2_mac}}</mac>
+      <interface>{{arp_2_interface}}</interface>
+      <status>c</status>
+    </entry>
+    <entry>
+      <ip>{{arp_3_ip}}</ip>
+      <mac>{{arp_3_mac}}</mac>
+      <interface>{{arp_3_interface}}</interface>
+      <status>c</status>
+    </entry>
+  </result>
+</response>
+

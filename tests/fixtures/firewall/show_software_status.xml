@@ -1,0 +1,7 @@
+<response status="success">
+  <result>
+    <downloading>{{downloading}}</downloading>
+    <progress>{{progress}}</progress>
+  </result>
+</response>
+

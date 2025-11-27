@@ -12,18 +12,19 @@ from panos_upgrade.config import Config
 class PanoramaClient:
     """Client for interacting with Panorama API."""
     
-    def __init__(self, config: Config, rate_limiter=None):
+    def __init__(self, config: Config, rate_limiter=None, xapi=None):
         """
         Initialize Panorama client.
         
         Args:
             config: Configuration instance
             rate_limiter: Rate limiter instance
+            xapi: Optional PanXapi instance for dependency injection (testing)
         """
         self.config = config
         self.rate_limiter = rate_limiter
         self.logger = get_logger("panos_upgrade.panorama")
-        self._xapi: Optional[PanXapi] = None
+        self._xapi: Optional[PanXapi] = xapi  # Allow injection for testing
     
     def _get_xapi(self) -> PanXapi:
         """Get or create PanXapi instance."""
@@ -236,9 +237,8 @@ class PanoramaClient:
                     continue
                 
                 # Check if this line is for our target mount
-                if target_mount == '/' and not line.rstrip().endswith(' /'):
-                    continue
-                elif target_mount != '/' and target_mount not in line:
+                # Must match exactly at end of line to avoid matching /opt/panrepo_backup for /opt/panrepo
+                if not line.rstrip().endswith(' ' + target_mount):
                     continue
                 
                 # Parse the line: Filesystem Size Used Avail Use% Mounted

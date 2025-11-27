@@ -1,0 +1,23 @@
+<response status="success">
+  <result>
+    <devices>
+      <entry name="{{device_1_serial}}">
+        <hostname>{{device_1_hostname}}</hostname>
+        <ip-address>{{device_1_ip}}</ip-address>
+        <serial>{{device_1_serial}}</serial>
+        <model>{{device_1_model}}</model>
+        <sw-version>{{device_1_version}}</sw-version>
+        <connected>yes</connected>
+      </entry>
+      <entry name="{{device_2_serial}}">
+        <hostname>{{device_2_hostname}}</hostname>
+        <ip-address>{{device_2_ip}}</ip-address>
+        <serial>{{device_2_serial}}</serial>
+        <model>{{device_2_model}}</model>
+        <sw-version>{{device_2_version}}</sw-version>
+        <connected>yes</connected>
+      </entry>
+    </devices>
+  </result>
+</response>
+

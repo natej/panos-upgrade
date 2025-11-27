@@ -1,0 +1,26 @@
+<response status="success">
+  <result>
+    <entry>
+      <destination>0.0.0.0/0</destination>
+      <nexthop>{{default_gateway}}</nexthop>
+      <interface>{{default_interface}}</interface>
+      <metric>10</metric>
+      <flags>A S</flags>
+    </entry>
+    <entry>
+      <destination>10.0.0.0/8</destination>
+      <nexthop>{{route_1_nexthop}}</nexthop>
+      <interface>{{route_1_interface}}</interface>
+      <metric>10</metric>
+      <flags>A S</flags>
+    </entry>
+    <entry>
+      <destination>192.168.0.0/16</destination>
+      <nexthop>{{route_2_nexthop}}</nexthop>
+      <interface>{{route_2_interface}}</interface>
+      <metric>10</metric>
+      <flags>A S</flags>
+    </entry>
+  </result>
+</response>
+
