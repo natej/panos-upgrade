@@ -51,6 +51,7 @@ CLI → Daemon → Panorama (device discovery only)
    └─ Load device info from inventory
    └─ Connect directly to firewall mgmt_ip
    └─ Check disk space
+   └─ Refresh available software versions (request system software check)
    └─ Check for already-downloaded versions
    └─ For each version in upgrade path:
       ├─ Skip if already downloaded
@@ -275,7 +276,9 @@ Shows:
 2025-11-23 12:00:00 - INFO - Starting download-only for device 001234567890
 2025-11-23 12:00:01 - INFO - Connecting directly to firewall: 10.1.1.10
 2025-11-23 12:00:02 - INFO - Disk space check passed: 15.50 GB available
-2025-11-23 12:00:03 - INFO - Found 1 version(s) already downloaded on 001234567890: 10.1.0
+2025-11-23 12:00:02 - INFO - Checking for software updates on 10.1.1.10
+2025-11-23 12:00:08 - INFO - Software check completed successfully on 10.1.1.10
+2025-11-23 12:00:09 - INFO - Found 1 version(s) already downloaded on 001234567890: 10.1.0
 2025-11-23 12:00:03 - INFO - Version 10.1.0 already downloaded on 001234567890, skipping
 2025-11-23 12:00:04 - INFO - Downloading version 10.5.1 (2/3)
 2025-11-23 12:00:14 - INFO - Download completed for 10.5.1 on 10.1.1.10
@@ -292,7 +295,9 @@ Shows:
 2025-11-23 12:00:00 - INFO - Starting download-only for device 001234567890
 2025-11-23 12:00:01 - INFO - Connecting directly to firewall: 10.1.1.10
 2025-11-23 12:00:02 - INFO - Disk space check passed: 15.50 GB available
-2025-11-23 12:00:03 - INFO - Found 3 version(s) already downloaded on 001234567890: 10.1.0, 10.5.1, 11.1.0
+2025-11-23 12:00:02 - INFO - Checking for software updates on 10.1.1.10
+2025-11-23 12:00:08 - INFO - Software check completed successfully on 10.1.1.10
+2025-11-23 12:00:09 - INFO - Found 3 version(s) already downloaded on 001234567890: 10.1.0, 10.5.1, 11.1.0
 2025-11-23 12:00:03 - INFO - Version 10.1.0 already downloaded on 001234567890, skipping
 2025-11-23 12:00:03 - INFO - Version 10.5.1 already downloaded on 001234567890, skipping
 2025-11-23 12:00:03 - INFO - Version 11.1.0 already downloaded on 001234567890, skipping
@@ -437,7 +442,8 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
   },
   "firewall": {
     "username": "admin",
-    "password": "YOUR_PASSWORD"
+    "password": "YOUR_PASSWORD",
+    "software_check_timeout": 60
   },
   "validation": {
     "min_disk_gb": 5.0
@@ -447,6 +453,13 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
   }
 }
 ```
+
+### Configuration Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `firewall.software_check_timeout` | 60 | Timeout (seconds) for `request system software check` |
+| `validation.min_disk_gb` | 5.0 | Minimum disk space required |
 
 ## Web Integration
 

@@ -65,6 +65,10 @@ class MockPanXapi:
         self.element_result: Optional[ET.Element] = None
         self.status: str = "success"
         self.status_detail: Optional[str] = None
+        self.timeout: int = 300  # Default timeout, can be modified by clients
+        
+        # Track last call's extra_qs for assertions
+        self.last_extra_qs: Optional[Dict] = None
     
     def add_response(
         self,
@@ -124,6 +128,7 @@ class MockPanXapi:
             extra_qs: Extra query string parameters (e.g., target serial)
         """
         kwargs = {"vsys": vsys, "extra_qs": extra_qs}
+        self.last_extra_qs = extra_qs  # Track for assertions
         
         # Find matching response
         response_xml = None

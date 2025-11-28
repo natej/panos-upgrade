@@ -63,6 +63,9 @@ class UpgradeManager:
         self._cancel_lock = threading.Lock()
         self._cancelled_jobs: set = set()
         self._cancelled_devices: set = set()
+        
+        # Track devices that have had software check run (to avoid duplicate checks)
+        self._software_check_done: set = set()
     
     def _load_upgrade_paths(self) -> Dict[str, List[str]]:
         """Load upgrade paths from configuration file."""
@@ -317,7 +320,27 @@ class UpgradeManager:
                     check_passed=True
                 )
             
-            # Phase 2: Download (skip if already downloaded)
+            # Phase 2: Refresh software list (only once per device)
+            if serial not in self._software_check_done:
+                device_status.current_phase = UpgradePhase.DOWNLOAD.value
+                device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
+                device_status.progress = 25
+                device_status.upgrade_message = "Refreshing available software versions..."
+                self._save_device_status(device_status)
+                
+                if dry_run:
+                    self.logger.info(f"[DRY RUN] Would refresh software version list on {serial}")
+                else:
+                    software_check_timeout = self.config.software_check_timeout
+                    success = self.panorama.check_software_updates(serial, timeout=software_check_timeout)
+                    if not success:
+                        self.logger.warning(
+                            f"Software check failed or timed out on {serial}, continuing anyway"
+                        )
+                
+                self._software_check_done.add(serial)
+            
+            # Phase 3: Download (skip if already downloaded)
             device_status.current_phase = UpgradePhase.DOWNLOAD.value
             device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
             device_status.progress = 30
@@ -658,6 +681,20 @@ class UpgradeManager:
                 self.logger.info(
                     f"Disk space check passed: {disk_space_gb:.2f} GB available"
                 )
+            
+            # Refresh available software versions from Palo Alto servers
+            device_status.upgrade_message = "Refreshing available software versions..."
+            self._save_device_status(device_status)
+            
+            if dry_run:
+                self.logger.info(f"[DRY RUN] Would refresh software version list on {serial}")
+            else:
+                software_check_timeout = self.config.software_check_timeout
+                success = firewall_client.check_software_updates(timeout=software_check_timeout)
+                if not success:
+                    self.logger.warning(
+                        f"Software check failed or timed out on {serial}, continuing anyway"
+                    )
             
             # Check for already-downloaded versions
             device_status.upgrade_message = "Checking existing software on device"

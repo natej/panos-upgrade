@@ -139,10 +139,10 @@ def generate_disk_space_response(
     Generate disk space response with configurable values.
     
     Args:
-        panrepo_available_gb: Available space on /opt/panrepo
-        panrepo_total_gb: Total size of /opt/panrepo
+        panrepo_available_gb: Available space on /opt/pancfg
+        panrepo_total_gb: Total size of /opt/pancfg
         root_available_gb: Available space on root partition
-        include_panrepo: Whether to include /opt/panrepo partition
+        include_panrepo: Whether to include /opt/pancfg partition
         
     Returns:
         XML response string
@@ -153,14 +153,14 @@ def generate_disk_space_response(
     lines = [
         "Filesystem      Size  Used Avail Use% Mounted on",
         f"/dev/sda2       5.1G  1.4G  {root_available_gb:.1f}G  27% /",
-        "/dev/sda5       7.6G  4.0G  3.3G  55% /opt/pancfg",
+        "/dev/sda5       7.6G  4.0G  3.3G  55% /opt/panrepo",
         "/dev/sda6        17G  7.5G  8.6G  47% /opt/panlogs",
     ]
     
     if include_panrepo:
         lines.append(
             f"/dev/sda8       {panrepo_total_gb:.1f}G  {panrepo_used:.1f}G  "
-            f"{panrepo_available_gb:.1f}G  {panrepo_percent}% /opt/panrepo"
+            f"{panrepo_available_gb:.1f}G  {panrepo_percent}% /opt/pancfg"
         )
     
     df_output = "\n".join(lines)

@@ -51,7 +51,8 @@ class Config:
             "firewall": {
                 "username": "",
                 "password": "",
-                "timeout": constants.DEFAULT_TIMEOUT
+                "timeout": constants.DEFAULT_TIMEOUT,
+                "software_check_timeout": constants.DEFAULT_SOFTWARE_CHECK_TIMEOUT
             },
             "workers": {
                 "max": constants.DEFAULT_WORKERS,
@@ -195,6 +196,11 @@ class Config:
     def firewall_password(self) -> str:
         """Get firewall password."""
         return self.get("firewall.password", "")
+    
+    @property
+    def software_check_timeout(self) -> int:
+        """Get timeout for software check command in seconds."""
+        return self.get("firewall.software_check_timeout", constants.DEFAULT_SOFTWARE_CHECK_TIMEOUT)
 
 
 # Global config instance

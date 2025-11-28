@@ -184,10 +184,10 @@ def create_disk_space_response(available_gb: float) -> str:
     /dev/sda2       5.1G  1.1G  3.7G  23% /
     /dev/sda5       7.6G  4.0G  3.3G  55% /opt/pancfg
     /dev/sda6        17G  7.5G  8.6G  47% /opt/panlogs
-    /dev/sda8        20G  5.0G  15.0G 25% /opt/panrepo
+    /dev/sda8        20G  5.0G  15.0G 25% /opt/pancfg
     
     Args:
-        available_gb: Available disk space in GB (for /opt/panrepo)
+        available_gb: Available disk space in GB (for /opt/pancfg)
         
     Returns:
         XML string
@@ -196,7 +196,7 @@ def create_disk_space_response(available_gb: float) -> str:
     result = ET.SubElement(response, "result")
     
     # Create realistic df-like output
-    # Software downloads go to /opt/panrepo, so that's the partition to report
+    # Software downloads go to /opt/pancfg, so that's the partition to report
     total_gb = 20.0
     used_gb = max(1.0, total_gb - available_gb)  # Simulate some used space
     use_percent = int((used_gb / total_gb) * 100)
@@ -205,7 +205,7 @@ def create_disk_space_response(available_gb: float) -> str:
 /dev/sda2       5.1G  1.1G  3.7G  23% /
 /dev/sda5       7.6G  4.0G  3.3G  55% /opt/pancfg
 /dev/sda6        17G  7.5G  8.6G  47% /opt/panlogs
-/dev/sda8       {total_gb:.1f}G  {used_gb:.1f}G  {available_gb:.1f}G  {use_percent}% /opt/panrepo"""
+/dev/sda8       {total_gb:.1f}G  {used_gb:.1f}G  {available_gb:.1f}G  {use_percent}% /opt/pancfg"""
     
     result.text = df_output
     

@@ -115,11 +115,11 @@ class DirectFirewallClient:
         """
         Parse df-like disk space output from PAN-OS.
         
-        Looks for /opt/panrepo partition first (where software downloads),
+        Looks for /opt/pancfg partition first (where software downloads),
         then falls back to root partition.
         
         Example output line:
-        /dev/sda8     7.6G  4.0G  3.3G   55% /opt/panrepo
+        /dev/sda8     7.6G  4.0G  3.3G   55% /opt/pancfg
         
         Args:
             text_output: Raw text from disk-space command
@@ -131,8 +131,8 @@ class DirectFirewallClient:
         
         lines = text_output.strip().split('\n')
         
-        # Priority order: /opt/panrepo (software downloads), then root /
-        target_mounts = ['/opt/panrepo', '/']
+        # Priority order: /opt/pancfg (software downloads), then root /
+        target_mounts = ['/opt/pancfg', '/']
         
         for target_mount in target_mounts:
             for line in lines:
@@ -141,7 +141,7 @@ class DirectFirewallClient:
                     continue
                 
                 # Check if this line is for our target mount
-                # Must match exactly at end of line to avoid matching /opt/panrepo_backup for /opt/panrepo
+                # Must match exactly at end of line to avoid matching /opt/pancfg_backup for /opt/pancfg
                 if not line.rstrip().endswith(' ' + target_mount):
                     continue
                 
@@ -328,4 +328,55 @@ class DirectFirewallClient:
         except Exception as e:
             self.logger.error(f"Failed to get downloaded versions from {self.mgmt_ip}: {e}")
             raise
+    
+    def check_software_updates(self, timeout: int = 60) -> bool:
+        """
+        Check for available software updates from Palo Alto servers.
+        
+        This command contacts Palo Alto's update servers to refresh the list
+        of available software versions. Must be run before downloading new
+        versions to ensure they appear in the software info list.
+        
+        Args:
+            timeout: Maximum time to wait for command completion in seconds
+            
+        Returns:
+            True if check completed successfully, False on failure/timeout
+        """
+        self.logger.info(f"Checking for software updates on {self.mgmt_ip}")
+        
+        try:
+            # Store original timeout and set new one for this operation
+            xapi = self._get_xapi()
+            original_timeout = xapi.timeout
+            xapi.timeout = timeout
+            
+            try:
+                cmd = "<request><system><software><check></check></software></system></request>"
+                result = self._op_command(cmd)
+                
+                if result is not None:
+                    # Command completed - check for success indicators
+                    status_text = "".join(result.itertext()).lower()
+                    if 'error' in status_text:
+                        self.logger.warning(
+                            f"Software check returned error on {self.mgmt_ip}: {status_text[:200]}"
+                        )
+                        return False
+                    
+                    self.logger.info(f"Software check completed successfully on {self.mgmt_ip}")
+                    return True
+                
+                self.logger.warning(f"Software check returned no result on {self.mgmt_ip}")
+                return False
+                
+            finally:
+                # Restore original timeout
+                xapi.timeout = original_timeout
+                
+        except Exception as e:
+            self.logger.warning(
+                f"Software check failed or timed out on {self.mgmt_ip}, continuing anyway: {e}"
+            )
+            return False
 
