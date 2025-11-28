@@ -647,10 +647,65 @@ class UpgradeManager:
                     rate_limiter=None  # No rate limiting for direct connections
                 )
             
-            # Pre-flight: Check disk space only
-            device_status.current_phase = "pre_flight_disk_check"
+            # Step 1: Refresh available software versions from Palo Alto servers
+            device_status.current_phase = "software_check"
             device_status.upgrade_status = UpgradeStatus.VALIDATING.value
             device_status.progress = 5
+            device_status.upgrade_message = "Refreshing available software versions..."
+            self._save_device_status(device_status)
+            
+            if dry_run:
+                self.logger.info(f"[DRY RUN] Would refresh software version list on {serial}")
+            else:
+                software_check_timeout = self.config.software_check_timeout
+                success = firewall_client.check_software_updates(timeout=software_check_timeout)
+                if not success:
+                    self.logger.warning(
+                        f"Software check failed or timed out on {serial}, continuing anyway"
+                    )
+            
+            # Step 2: Check for already-downloaded versions
+            device_status.upgrade_message = "Checking existing software on device"
+            self._save_device_status(device_status)
+            
+            versions_to_download = []
+            if dry_run:
+                self.logger.info(f"[DRY RUN] Would check existing software on {serial}")
+                versions_to_download = upgrade_path  # Assume all need download in dry run
+            else:
+                software_info_timeout = self.config.software_info_timeout
+                existing_versions = firewall_client.get_downloaded_versions(timeout=software_info_timeout)
+                
+                # Determine which versions need to be downloaded
+                for version in upgrade_path:
+                    if existing_versions.get(version, {}).get("downloaded", False):
+                        self.logger.info(f"Version {version} already downloaded on {serial}")
+                        device_status.skipped_versions.append(version)
+                    else:
+                        versions_to_download.append(version)
+                
+                if device_status.skipped_versions:
+                    self.logger.info(
+                        f"Found {len(device_status.skipped_versions)} version(s) already downloaded on {serial}: "
+                        f"{', '.join(device_status.skipped_versions)}"
+                    )
+            
+            # Step 3: If all versions already downloaded, skip disk space check
+            if not versions_to_download and not dry_run:
+                self.logger.info(f"All versions already downloaded on {serial}, skipping disk space check")
+                device_status.upgrade_status = constants.STATUS_DOWNLOAD_COMPLETE
+                device_status.progress = 100
+                device_status.ready_for_install = True
+                skipped_str = ", ".join(device_status.skipped_versions)
+                device_status.upgrade_message = f"All {len(device_status.skipped_versions)} version(s) already downloaded: {skipped_str}"
+                self._save_device_status(device_status)
+                msg = f"Download complete for {serial}: all versions already present"
+                self.logger.info(msg, extra={'serial': serial})
+                return True, msg
+            
+            # Step 4: Check disk space (only if we need to download something)
+            device_status.current_phase = "pre_flight_disk_check"
+            device_status.progress = 8
             device_status.upgrade_message = "Checking available disk space"
             self._save_device_status(device_status)
             
@@ -682,37 +737,9 @@ class UpgradeManager:
                     f"Disk space check passed: {disk_space_gb:.2f} GB available"
                 )
             
-            # Refresh available software versions from Palo Alto servers
-            device_status.upgrade_message = "Refreshing available software versions..."
-            self._save_device_status(device_status)
-            
-            if dry_run:
-                self.logger.info(f"[DRY RUN] Would refresh software version list on {serial}")
-            else:
-                software_check_timeout = self.config.software_check_timeout
-                success = firewall_client.check_software_updates(timeout=software_check_timeout)
-                if not success:
-                    self.logger.warning(
-                        f"Software check failed or timed out on {serial}, continuing anyway"
-                    )
-            
-            # Check for already-downloaded versions
-            device_status.upgrade_message = "Checking existing software on device"
-            self._save_device_status(device_status)
-            
-            if not dry_run:
-                software_info_timeout = self.config.software_info_timeout
-                existing_versions = firewall_client.get_downloaded_versions(timeout=software_info_timeout)
-                
-                # Log what we found
-                already_downloaded = [v for v in upgrade_path if existing_versions.get(v, {}).get("downloaded", False)]
-                if already_downloaded:
-                    self.logger.info(
-                        f"Found {len(already_downloaded)} version(s) already downloaded on {serial}: {', '.join(already_downloaded)}"
-                    )
-            
-            # Download each version in path (skip if already present)
-            for idx, version in enumerate(upgrade_path):
+            # Download each version that needs downloading
+            total_to_download = len(versions_to_download)
+            for idx, version in enumerate(versions_to_download):
                 # Check for cancellation
                 if self._is_cancelled(job_id, serial):
                     self.logger.info(f"Download cancelled for {serial}")
@@ -721,27 +748,13 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False, "Cancelled"
                 
-                device_status.current_path_index = idx
+                device_status.current_path_index = upgrade_path.index(version)
                 device_status.current_phase = "download"
                 device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
-                progress_base = 10 + (idx * 80 // len(upgrade_path))
+                progress_base = 10 + (idx * 80 // max(total_to_download, 1))
                 device_status.progress = progress_base
                 
-                # Check if version is already downloaded
-                version_info = existing_versions.get(version, {})
-                already_downloaded = version_info.get("downloaded", False)
-                
-                if already_downloaded and not dry_run:
-                    # Version already present - skip download
-                    self.logger.info(
-                        f"Version {version} already downloaded on {serial}, skipping"
-                    )
-                    device_status.upgrade_message = f"Version {version} already downloaded, skipping ({idx + 1}/{len(upgrade_path)})"
-                    device_status.skipped_versions.append(version)
-                    self._save_device_status(device_status)
-                    continue
-                
-                device_status.upgrade_message = f"Downloading version {version} ({idx + 1}/{len(upgrade_path)})"
+                device_status.upgrade_message = f"Downloading version {version} ({idx + 1}/{total_to_download})"
                 self._save_device_status(device_status)
                 
                 if dry_run:
@@ -768,7 +781,7 @@ class UpgradeManager:
                     def update_progress(download_progress: int):
                         # Map download progress (0-100) to overall progress range for this version
                         # Each version gets an equal slice of the 10-90 range
-                        version_slice = 80 // len(upgrade_path)
+                        version_slice = 80 // max(total_to_download, 1)
                         base_progress = 10 + (idx * version_slice)
                         device_status.progress = base_progress + int(download_progress * version_slice / 100)
                         device_status.upgrade_message = f"Downloading {version}: {download_progress}%"
