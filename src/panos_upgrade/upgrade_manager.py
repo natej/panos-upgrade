@@ -749,9 +749,9 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     time.sleep(1)
                 else:
-                    # Download
-                    success = firewall_client.download_software(version)
-                    if not success:
+                    # Initiate download - returns job ID
+                    job_id_download = firewall_client.download_software(version)
+                    if not job_id_download:
                         msg = f"Failed to initiate download of {version}"
                         device_status.add_error("download", msg)
                         device_status.upgrade_status = UpgradeStatus.FAILED.value
@@ -759,13 +759,13 @@ class UpgradeManager:
                         self._save_device_status(device_status)
                         return False, msg
                     
-                    # Wait for download
-                    device_status.upgrade_message = f"Downloading {version}..."
+                    # Wait for download job to complete
+                    device_status.upgrade_message = f"Downloading {version} (job {job_id_download})..."
                     self._save_device_status(device_status)
                     
-                    success = firewall_client.wait_for_download(version, timeout=1800)
+                    success = firewall_client.wait_for_download(job_id_download, version, timeout=1800)
                     if not success:
-                        msg = f"Download of {version} did not complete"
+                        msg = f"Download of {version} failed or did not complete"
                         device_status.add_error("download", msg)
                         device_status.upgrade_status = UpgradeStatus.FAILED.value
                         device_status.upgrade_message = msg

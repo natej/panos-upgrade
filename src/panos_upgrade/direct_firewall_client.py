@@ -172,7 +172,7 @@ class DirectFirewallClient:
         self.logger.warning(f"Could not parse disk space from output: {text_output[:200]}")
         return 0.0
     
-    def download_software(self, version: str) -> bool:
+    def download_software(self, version: str) -> Optional[str]:
         """
         Download software version to firewall.
         
@@ -180,7 +180,7 @@ class DirectFirewallClient:
             version: Software version to download
             
         Returns:
-            True if download initiated successfully
+            Job ID if download initiated successfully, None on failure
         """
         self.logger.info(f"Downloading version {version} to {self.mgmt_ip}")
         
@@ -189,19 +189,64 @@ class DirectFirewallClient:
             result = self._op_command(cmd)
             
             if result is not None:
-                status = result.findtext('.//status', '')
-                if 'success' in status.lower():
-                    self.logger.info(f"Download initiated for {version} on {self.mgmt_ip}")
-                    return True
+                # Response contains a job ID for the async download
+                # Example: <result><job>2</job><msg>...</msg></result>
+                job_id = result.findtext('.//job', '')
+                if job_id:
+                    self.logger.info(f"Download initiated for {version} on {self.mgmt_ip} (job: {job_id})")
+                    return job_id
+                
+                # Check for error message
+                msg = result.findtext('.//msg', '') or result.findtext('.//line', '')
+                if msg:
+                    self.logger.error(f"Download failed for {version}: {msg}")
             
-            return False
+            return None
         except Exception as e:
             self.logger.error(f"Failed to download software on {self.mgmt_ip}: {e}")
             raise
     
+    def check_job_status(self, job_id: str) -> Dict[str, Any]:
+        """
+        Check status of a job by ID.
+        
+        Args:
+            job_id: Job ID to check
+            
+        Returns:
+            Dictionary with job status including:
+            - status: Job status (ACT, FIN, etc.)
+            - result: Job result (OK, FAIL, etc.)
+            - progress: Progress percentage
+            - details: Job description/details
+        """
+        try:
+            cmd = f"<show><jobs><id>{job_id}</id></jobs></show>"
+            result = self._op_command(cmd)
+            
+            status = {
+                'status': 'UNKNOWN',
+                'result': '',
+                'progress': '0',
+                'details': ''
+            }
+            
+            if result is not None:
+                job = result.find('.//job')
+                if job is not None:
+                    status['status'] = job.findtext('status', 'UNKNOWN')
+                    status['result'] = job.findtext('result', '')
+                    status['progress'] = job.findtext('progress', '0')
+                    status['details'] = job.findtext('details', '') or job.findtext('description', '')
+            
+            return status
+        except Exception as e:
+            self.logger.error(f"Failed to check job status on {self.mgmt_ip}: {e}")
+            raise
+    
     def check_download_status(self) -> Dict[str, Any]:
         """
-        Check software download status.
+        Check software download status (legacy method).
         
         Returns:
             Dictionary with download status
@@ -253,43 +298,61 @@ class DirectFirewallClient:
             self.logger.error(f"Failed to get software info from {self.mgmt_ip}: {e}")
             raise
     
-    def wait_for_download(self, version: str, timeout: int = 1800) -> bool:
+    def wait_for_download(self, job_id: str, version: str, timeout: int = 1800) -> bool:
         """
-        Wait for download to complete.
+        Wait for download job to complete.
         
         Args:
-            version: Software version being downloaded
+            job_id: Job ID returned from download_software()
+            version: Software version being downloaded (for logging)
             timeout: Maximum time to wait in seconds
             
         Returns:
             True if download completed successfully
         """
-        self.logger.info(f"Waiting for download of {version} on {self.mgmt_ip}")
+        self.logger.info(f"Waiting for download job {job_id} ({version}) on {self.mgmt_ip}")
         
         start_time = time.time()
-        poll_interval = 30
+        poll_interval = 10  # Poll every 10 seconds
         
         while time.time() - start_time < timeout:
             try:
-                status = self.check_download_status()
-                downloading = status.get('downloading', 'no')
-                
-                if downloading.lower() == 'no':
-                    self.logger.info(f"Download completed for {version} on {self.mgmt_ip}")
-                    return True
-                
-                # Log progress
+                status = self.check_job_status(job_id)
+                job_status = status.get('status', 'UNKNOWN')
+                job_result = status.get('result', '')
                 progress = status.get('progress', '0')
-                self.logger.debug(f"Download progress: {progress}")
                 
+                self.logger.debug(
+                    f"Job {job_id} status: {job_status}, result: {job_result}, progress: {progress}%"
+                )
+                
+                # Job finished
+                if job_status == 'FIN':
+                    if job_result == 'OK':
+                        self.logger.info(f"Download completed for {version} on {self.mgmt_ip}")
+                        return True
+                    else:
+                        details = status.get('details', 'Unknown error')
+                        self.logger.error(
+                            f"Download failed for {version} on {self.mgmt_ip}: {details}"
+                        )
+                        return False
+                
+                # Job still running (ACT = active)
+                if job_status in ('ACT', 'PEND'):
+                    time.sleep(poll_interval)
+                    continue
+                
+                # Unknown status - keep polling
+                self.logger.warning(f"Unknown job status: {job_status}")
                 time.sleep(poll_interval)
                 
             except Exception as e:
-                self.logger.warning(f"Error checking download status: {e}")
+                self.logger.warning(f"Error checking job status: {e}")
                 time.sleep(poll_interval)
         
         self.logger.error(
-            f"Download did not complete within {timeout} seconds on {self.mgmt_ip}"
+            f"Download job {job_id} did not complete within {timeout} seconds on {self.mgmt_ip}"
         )
         return False
     

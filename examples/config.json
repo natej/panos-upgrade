@@ -9,7 +9,7 @@
     "username": "admin",
     "password": "YOUR_FIREWALL_PASSWORD",
     "timeout": 300,
-    "software_check_timeout": 60
+    "software_check_timeout": 90
   },
   "workers": {
     "max": 5,

@@ -132,13 +132,15 @@ class TestDownloadInitiation:
     """Test software download initiation."""
     
     def test_initiates_download_successfully(self, mock_xapi):
-        """Should successfully initiate download."""
+        """Should successfully initiate download and return job ID."""
         mock_xapi.add_response(
             "request.system.software.download",
-            '''<response status="success">
+            '''<response status="success" code="19">
   <result>
-    <status>success</status>
-    <msg>Download job enqueued for version 11.0.0</msg>
+    <msg>
+      <line>Download job enqueued with jobid 42</line>
+    </msg>
+    <job>42</job>
   </result>
 </response>'''
         )
@@ -152,7 +154,7 @@ class TestDownloadInitiation:
         
         result = client.download_software("11.0.0")
         
-        assert result == True
+        assert result == "42"  # Returns job ID
         mock_xapi.assert_called_with("request.system.software.download")
     
     def test_handles_download_failure(self, mock_xapi):
@@ -193,4 +195,112 @@ class TestDownloadInitiation:
         result = client.download_software("001234567890", "11.0.0")
         
         assert result == True
+
+
+class TestJobStatusChecking:
+    """Test job status checking for download jobs."""
+    
+    def test_parses_active_job(self, mock_xapi):
+        """Should correctly parse active job status."""
+        mock_xapi.add_response(
+            "show.jobs.id",
+            '''<response status="success">
+  <result>
+    <job>
+      <tenq>2025/11/28 16:48:53</tenq>
+      <id>42</id>
+      <user>admin</user>
+      <type>Downld</type>
+      <status>ACT</status>
+      <queued>NO</queued>
+      <stoppable>yes</stoppable>
+      <result>PEND</result>
+      <progress>45</progress>
+      <description>Download of software version 11.1.0</description>
+    </job>
+  </result>
+</response>'''
+        )
+        
+        client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        result = client.check_job_status("42")
+        
+        assert result["status"] == "ACT"
+        assert result["result"] == "PEND"
+        assert result["progress"] == "45"
+    
+    def test_parses_completed_job(self, mock_xapi):
+        """Should correctly parse completed job status."""
+        mock_xapi.add_response(
+            "show.jobs.id",
+            '''<response status="success">
+  <result>
+    <job>
+      <tenq>2025/11/28 16:48:53</tenq>
+      <id>42</id>
+      <user>admin</user>
+      <type>Downld</type>
+      <status>FIN</status>
+      <queued>NO</queued>
+      <stoppable>no</stoppable>
+      <result>OK</result>
+      <tfin>2025/11/28 16:50:00</tfin>
+      <description>Download of software version 11.1.0</description>
+    </job>
+  </result>
+</response>'''
+        )
+        
+        client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        result = client.check_job_status("42")
+        
+        assert result["status"] == "FIN"
+        assert result["result"] == "OK"
+    
+    def test_parses_failed_job(self, mock_xapi):
+        """Should correctly parse failed job status."""
+        mock_xapi.add_response(
+            "show.jobs.id",
+            '''<response status="success">
+  <result>
+    <job>
+      <tenq>2025/11/28 16:48:53</tenq>
+      <id>42</id>
+      <user>admin</user>
+      <type>Downld</type>
+      <status>FIN</status>
+      <queued>NO</queued>
+      <stoppable>no</stoppable>
+      <result>FAIL</result>
+      <tfin>2025/11/28 16:50:00</tfin>
+      <details>Connection timeout to update server</details>
+    </job>
+  </result>
+</response>'''
+        )
+        
+        client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        result = client.check_job_status("42")
+        
+        assert result["status"] == "FIN"
+        assert result["result"] == "FAIL"
+        assert result["details"] == "Connection timeout to update server"
 
