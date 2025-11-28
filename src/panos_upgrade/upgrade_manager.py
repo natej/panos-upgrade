@@ -701,7 +701,8 @@ class UpgradeManager:
             self._save_device_status(device_status)
             
             if not dry_run:
-                existing_versions = firewall_client.get_downloaded_versions()
+                software_info_timeout = self.config.software_info_timeout
+                existing_versions = firewall_client.get_downloaded_versions(timeout=software_info_timeout)
                 
                 # Log what we found
                 already_downloaded = [v for v in upgrade_path if existing_versions.get(v, {}).get("downloaded", False)]

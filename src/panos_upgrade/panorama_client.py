@@ -406,12 +406,16 @@ class PanoramaClient:
             self.logger.error(f"Failed to get connected devices: {e}")
             raise
     
-    def get_software_info(self, serial: str) -> Dict[str, Any]:
+    def get_software_info(self, serial: str, timeout: int = 120) -> Dict[str, Any]:
         """
         Get software information including downloaded versions and hashes.
         
+        This runs 'request system software info' which can take time on devices
+        with many software versions.
+        
         Args:
             serial: Device serial number
+            timeout: Command timeout in seconds (default 90)
             
         Returns:
             Dictionary with software information
@@ -419,24 +423,47 @@ class PanoramaClient:
         self.logger.debug(f"Getting software info for {serial}")
         
         try:
-            # Use 'request system software info' to get available/downloaded versions
-            cmd = "<request><system><software><info></info></software></system></request>"
-            result = self._op_command(cmd, serial=serial)
+            # Store original timeout and set new one for this operation
+            xapi = self._get_xapi()
+            original_timeout = xapi.timeout
+            xapi.timeout = timeout
             
-            versions = []
-            if result is not None:
-                for entry in result.findall('.//sw-version'):
-                    version_info = {
-                        "version": entry.findtext('version', ''),
-                        "filename": entry.findtext('filename', ''),
-                        "size": entry.findtext('size', ''),
-                        "downloaded": entry.findtext('downloaded', 'no'),
-                        "current": entry.findtext('current', 'no'),
-                        "sha256": entry.findtext('sha256', '')
-                    }
-                    versions.append(version_info)
+            try:
+                # Use 'request system software info' to get available/downloaded versions
+                cmd = "<request><system><software><info></info></software></system></request>"
+                result = self._op_command(cmd, serial=serial)
+                
+                versions = []
+                if result is not None:
+                    # Try multiple element names - PAN-OS versions may vary
+                    entries = result.findall('.//entry')
+                    if not entries:
+                        entries = result.findall('.//sw-version')
+                    if not entries:
+                        versions_elem = result.find('.//versions')
+                        if versions_elem is not None:
+                            entries = list(versions_elem)
+                    
+                    self.logger.debug(f"Found {len(entries)} software entries in response")
+                    
+                    for entry in entries:
+                        version_info = {
+                            "version": entry.findtext('version', ''),
+                            "filename": entry.findtext('filename', ''),
+                            "size": entry.findtext('size', ''),
+                            "downloaded": entry.findtext('downloaded', 'no'),
+                            "current": entry.findtext('current', 'no'),
+                            "sha256": entry.findtext('sha256', '')
+                        }
+                        if version_info["version"]:
+                            versions.append(version_info)
+                
+                self.logger.debug(f"Parsed {len(versions)} versions from software info")
+                return {"versions": versions}
             
-            return {"versions": versions}
+            finally:
+                # Restore original timeout
+                xapi.timeout = original_timeout
             
         except Exception as e:
             self.logger.error(f"Failed to get software info for {serial}: {e}")

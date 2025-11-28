@@ -265,9 +265,15 @@ class DirectFirewallClient:
             self.logger.error(f"Failed to check download status on {self.mgmt_ip}: {e}")
             raise
     
-    def get_software_info(self) -> Dict[str, Any]:
+    def get_software_info(self, timeout: int = 120) -> Dict[str, Any]:
         """
         Get software information including downloaded versions.
+        
+        This runs 'request system software info' which can take time on devices
+        with many software versions.
+        
+        Args:
+            timeout: Command timeout in seconds (default 90)
         
         Returns:
             Dictionary with software information
@@ -275,43 +281,53 @@ class DirectFirewallClient:
         self.logger.debug(f"Getting software info from {self.mgmt_ip}")
         
         try:
-            # Use 'request system software info' to get available/downloaded versions
-            cmd = "<request><system><software><info></info></software></system></request>"
-            result = self._op_command(cmd)
+            # Store original timeout and set new one for this operation
+            xapi = self._get_xapi()
+            original_timeout = xapi.timeout
+            xapi.timeout = timeout
             
-            versions = []
-            if result is not None:
-                # Try multiple element names - PAN-OS versions may vary
-                # Common patterns: <entry>, <sw-version>, or direct children of <versions>
-                entries = result.findall('.//entry')
-                if not entries:
-                    entries = result.findall('.//sw-version')
-                if not entries:
-                    # Try looking for versions container
-                    versions_elem = result.find('.//versions')
-                    if versions_elem is not None:
-                        entries = list(versions_elem)
+            try:
+                # Use 'request system software info' to get available/downloaded versions
+                cmd = "<request><system><software><info></info></software></system></request>"
+                result = self._op_command(cmd)
                 
-                self.logger.debug(f"Found {len(entries)} software entries in response")
+                versions = []
+                if result is not None:
+                    # Try multiple element names - PAN-OS versions may vary
+                    # Common patterns: <entry>, <sw-version>, or direct children of <versions>
+                    entries = result.findall('.//entry')
+                    if not entries:
+                        entries = result.findall('.//sw-version')
+                    if not entries:
+                        # Try looking for versions container
+                        versions_elem = result.find('.//versions')
+                        if versions_elem is not None:
+                            entries = list(versions_elem)
+                    
+                    self.logger.debug(f"Found {len(entries)} software entries in response")
+                    
+                    for entry in entries:
+                        version_info = {
+                            "version": entry.findtext('version', ''),
+                            "filename": entry.findtext('filename', ''),
+                            "size": entry.findtext('size', ''),
+                            "downloaded": entry.findtext('downloaded', 'no'),
+                            "current": entry.findtext('current', 'no'),
+                            "sha256": entry.findtext('sha256', '')
+                        }
+                        # Only add if we got a version
+                        if version_info["version"]:
+                            versions.append(version_info)
+                            self.logger.debug(
+                                f"Version {version_info['version']}: downloaded={version_info['downloaded']}"
+                            )
                 
-                for entry in entries:
-                    version_info = {
-                        "version": entry.findtext('version', ''),
-                        "filename": entry.findtext('filename', ''),
-                        "size": entry.findtext('size', ''),
-                        "downloaded": entry.findtext('downloaded', 'no'),
-                        "current": entry.findtext('current', 'no'),
-                        "sha256": entry.findtext('sha256', '')
-                    }
-                    # Only add if we got a version
-                    if version_info["version"]:
-                        versions.append(version_info)
-                        self.logger.debug(
-                            f"Version {version_info['version']}: downloaded={version_info['downloaded']}"
-                        )
+                self.logger.debug(f"Parsed {len(versions)} versions from software info")
+                return {"versions": versions}
             
-            self.logger.debug(f"Parsed {len(versions)} versions from software info")
-            return {"versions": versions}
+            finally:
+                # Restore original timeout
+                xapi.timeout = original_timeout
             
         except Exception as e:
             self.logger.error(f"Failed to get software info from {self.mgmt_ip}: {e}")
@@ -397,9 +413,12 @@ class DirectFirewallClient:
         )
         return False
     
-    def get_downloaded_versions(self) -> Dict[str, Dict[str, Any]]:
+    def get_downloaded_versions(self, timeout: int = 120) -> Dict[str, Dict[str, Any]]:
         """
         Get list of already-downloaded software versions.
+        
+        Args:
+            timeout: Command timeout in seconds (default 90)
         
         Returns:
             Dictionary mapping version to info dict with keys:
@@ -410,7 +429,7 @@ class DirectFirewallClient:
         self.logger.debug(f"Checking downloaded versions on {self.mgmt_ip}")
         
         try:
-            software_info = self.get_software_info()
+            software_info = self.get_software_info(timeout=timeout)
             
             result = {}
             for sw in software_info.get("versions", []):
