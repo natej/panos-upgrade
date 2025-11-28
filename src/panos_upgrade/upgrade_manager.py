@@ -759,11 +759,26 @@ class UpgradeManager:
                         self._save_device_status(device_status)
                         return False, msg
                     
-                    # Wait for download job to complete
+                    # Wait for download job to complete with progress updates
                     device_status.upgrade_message = f"Downloading {version} (job {job_id_download})..."
                     self._save_device_status(device_status)
                     
-                    success = firewall_client.wait_for_download(job_id_download, version, timeout=1800)
+                    # Progress callback to update device status
+                    def update_progress(download_progress: int):
+                        # Map download progress (0-100) to overall progress range for this version
+                        # Each version gets an equal slice of the 10-90 range
+                        version_slice = 80 // len(upgrade_path)
+                        base_progress = 10 + (idx * version_slice)
+                        device_status.progress = base_progress + int(download_progress * version_slice / 100)
+                        device_status.upgrade_message = f"Downloading {version}: {download_progress}%"
+                        self._save_device_status(device_status)
+                    
+                    success = firewall_client.wait_for_download(
+                        job_id_download,
+                        version,
+                        timeout=1800,
+                        progress_callback=update_progress
+                    )
                     if not success:
                         msg = f"Download of {version} failed or did not complete"
                         device_status.add_error("download", msg)

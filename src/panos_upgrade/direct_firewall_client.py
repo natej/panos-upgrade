@@ -281,7 +281,20 @@ class DirectFirewallClient:
             
             versions = []
             if result is not None:
-                for entry in result.findall('.//sw-version'):
+                # Try multiple element names - PAN-OS versions may vary
+                # Common patterns: <entry>, <sw-version>, or direct children of <versions>
+                entries = result.findall('.//entry')
+                if not entries:
+                    entries = result.findall('.//sw-version')
+                if not entries:
+                    # Try looking for versions container
+                    versions_elem = result.find('.//versions')
+                    if versions_elem is not None:
+                        entries = list(versions_elem)
+                
+                self.logger.debug(f"Found {len(entries)} software entries in response")
+                
+                for entry in entries:
                     version_info = {
                         "version": entry.findtext('version', ''),
                         "filename": entry.findtext('filename', ''),
@@ -290,15 +303,27 @@ class DirectFirewallClient:
                         "current": entry.findtext('current', 'no'),
                         "sha256": entry.findtext('sha256', '')
                     }
-                    versions.append(version_info)
+                    # Only add if we got a version
+                    if version_info["version"]:
+                        versions.append(version_info)
+                        self.logger.debug(
+                            f"Version {version_info['version']}: downloaded={version_info['downloaded']}"
+                        )
             
+            self.logger.debug(f"Parsed {len(versions)} versions from software info")
             return {"versions": versions}
             
         except Exception as e:
             self.logger.error(f"Failed to get software info from {self.mgmt_ip}: {e}")
             raise
     
-    def wait_for_download(self, job_id: str, version: str, timeout: int = 1800) -> bool:
+    def wait_for_download(
+        self,
+        job_id: str,
+        version: str,
+        timeout: int = 1800,
+        progress_callback: Optional[callable] = None
+    ) -> bool:
         """
         Wait for download job to complete.
         
@@ -306,6 +331,7 @@ class DirectFirewallClient:
             job_id: Job ID returned from download_software()
             version: Software version being downloaded (for logging)
             timeout: Maximum time to wait in seconds
+            progress_callback: Optional callback function(progress_percent: int) called on progress updates
             
         Returns:
             True if download completed successfully
@@ -314,17 +340,32 @@ class DirectFirewallClient:
         
         start_time = time.time()
         poll_interval = 10  # Poll every 10 seconds
+        last_progress = -1
         
         while time.time() - start_time < timeout:
             try:
                 status = self.check_job_status(job_id)
                 job_status = status.get('status', 'UNKNOWN')
                 job_result = status.get('result', '')
-                progress = status.get('progress', '0')
+                progress_str = status.get('progress', '0')
+                
+                # Parse progress as int
+                try:
+                    progress = int(progress_str)
+                except (ValueError, TypeError):
+                    progress = 0
                 
                 self.logger.debug(
                     f"Job {job_id} status: {job_status}, result: {job_result}, progress: {progress}%"
                 )
+                
+                # Call progress callback if progress changed
+                if progress_callback and progress != last_progress:
+                    try:
+                        progress_callback(progress)
+                    except Exception as e:
+                        self.logger.warning(f"Progress callback error: {e}")
+                    last_progress = progress
                 
                 # Job finished
                 if job_status == 'FIN':
