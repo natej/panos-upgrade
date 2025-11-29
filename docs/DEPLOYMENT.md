@@ -16,10 +16,14 @@ This guide covers deploying the PAN-OS Upgrade Manager in a production environme
 
 ### Access Requirements
 
-- Panorama API key with permissions:
-  - Device management
-  - Software management
-  - Configuration read access
+- **Panorama API key** (for device discovery only):
+  - Device management read access
+- **Firewall credentials** (for direct connections):
+  - Username/password with API access on all firewalls
+  - Software management permissions
+- **Network connectivity**:
+  - To Panorama server (for discovery)
+  - To all firewall management IPs (for operations)
 - SSH/console access to deployment server
 - Sudo privileges for systemd service setup
 
@@ -67,13 +71,16 @@ python scripts/init_system.py
 ### 3. Configure Application
 
 ```bash
-# Set Panorama connection
+# Set Panorama connection (for device discovery)
 panos-upgrade config set panorama.host panorama.example.com
 panos-upgrade config set panorama.api_key YOUR_SECURE_API_KEY
 
+# Set firewall credentials (for direct connections)
+panos-upgrade config set firewall.username admin
+panos-upgrade config set firewall.password YOUR_SECURE_PASSWORD
+
 # Configure for production
 panos-upgrade config set workers.max 10
-panos-upgrade config set panorama.rate_limit 10
 panos-upgrade config set validation.min_disk_gb 5.0
 panos-upgrade config set logging.level INFO
 
@@ -81,6 +88,9 @@ panos-upgrade config set logging.level INFO
 cp examples/upgrade_paths.json /var/lib/panos-upgrade/config/
 # Edit as needed
 nano /var/lib/panos-upgrade/config/upgrade_paths.json
+
+# Discover devices from Panorama
+panos-upgrade device discover
 ```
 
 ### 4. Set Up Systemd Service
@@ -337,8 +347,12 @@ sudo chown -R panos-upgrade:panos-upgrade /var/lib/panos-upgrade
 ### 2. Firewall Rules
 
 ```bash
-# Only allow outbound HTTPS to Panorama
+# Allow outbound HTTPS to Panorama (for discovery)
 sudo ufw allow out to PANORAMA_IP port 443 proto tcp
+
+# Allow outbound HTTPS to all firewall management IPs (for operations)
+# This may require a range or multiple rules depending on your network
+sudo ufw allow out to FIREWALL_MGMT_NETWORK/24 port 443 proto tcp
 ```
 
 ### 3. API Key Management
@@ -477,14 +491,27 @@ sudo systemctl restart panos-upgrade
 ### Slow Upgrades
 
 ```bash
-# Check rate limiting
-panos-upgrade config show | grep rate_limit
-
-# Check Panorama connectivity
-ping PANORAMA_HOST
-
 # Check worker utilization
 cat /var/lib/panos-upgrade/status/workers.json | jq
+
+# Check firewall connectivity (operations use direct connections)
+ping FIREWALL_MGMT_IP
+
+# Check if inventory is populated
+cat /var/lib/panos-upgrade/devices/inventory.json | jq '.devices | length'
+```
+
+### Cannot Connect to Firewalls
+
+```bash
+# Verify firewall credentials
+panos-upgrade config show | grep firewall
+
+# Test connectivity to firewall management IP
+curl -k https://FIREWALL_MGMT_IP/api/
+
+# Re-discover devices if inventory is stale
+panos-upgrade device discover
 ```
 
 ## Maintenance
@@ -559,13 +586,17 @@ sudo systemctl status panos-upgrade
 - [ ] Application installed in /opt/panos-upgrade
 - [ ] Virtual environment configured
 - [ ] Configuration files secured (600 permissions)
+- [ ] Panorama connection configured (for discovery)
+- [ ] Firewall credentials configured (for operations)
+- [ ] Device discovery completed (`panos-upgrade device discover`)
 - [ ] Upgrade paths configured and tested
+- [ ] Network connectivity verified to all firewall management IPs
 - [ ] Systemd service configured and enabled
 - [ ] Log rotation configured
 - [ ] Monitoring/health checks in place
 - [ ] Backup script configured
 - [ ] Web application integration tested
-- [ ] Firewall rules configured
+- [ ] Firewall rules configured (Panorama + firewall mgmt IPs)
 - [ ] Documentation accessible to team
 - [ ] Tested with dry-run mode
 - [ ] Emergency procedures documented

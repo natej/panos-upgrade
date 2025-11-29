@@ -4,11 +4,15 @@
 
 # PAN-OS Upgrade Manager
 
-Advanced CLI application for managing PAN-OS device upgrades through Panorama with daemon capabilities, concurrent processing, and comprehensive validation.
+Advanced CLI application for managing PAN-OS device upgrades with daemon capabilities, concurrent processing, and comprehensive validation.
 
 ## Overview
 
-This application provides a robust, production-ready solution for upgrading PAN-OS firewalls at scale. It manages ~230 devices through Panorama with features designed for reliability, observability, and administrative control.
+This application provides a robust, production-ready solution for upgrading PAN-OS firewalls at scale. It manages ~230 devices with features designed for reliability, observability, and administrative control.
+
+**Key Architecture:** The application uses a two-tier connection model:
+- **Panorama** is used only for device discovery (`show devices connected`)
+- **Direct firewall connections** are used for all operations (upgrades, downloads, validation)
 
 ## Key Features
 
@@ -17,7 +21,8 @@ This application provides a robust, production-ready solution for upgrading PAN-
 - **Concurrent Processing**: Configurable thread pool (1-50 workers) for parallel upgrades
 - **HA Pair Support**: Intelligent HA pair upgrades (passive member first)
 - **Version Path Management**: Configurable multi-step upgrade paths
-- **Rate Limiting**: Prevents Panorama API overload
+- **Direct Firewall Connections**: All operations connect directly to firewalls for reliability
+- **Download-Only Mode**: Pre-stage software images without performing upgrades
 
 ### Validation & Safety
 - **Pre-flight Validation**: Disk space, TCP sessions, routes, ARP entries
@@ -40,12 +45,35 @@ This application provides a robust, production-ready solution for upgrading PAN-
 ## Architecture
 
 ```
-CLI → Daemon → Worker Pool → Upgrade Manager → Panorama → Firewalls
-                    ↓              ↓
-              Command Queue   Validation System
-                    ↓              ↓
-              Status Files    Metric Comparison
+                                    ┌─────────────────────────────────┐
+                                    │         Device Discovery        │
+                                    │   (Panorama: show devices       │
+                                    │    connected)                   │
+                                    └────────────┬────────────────────┘
+                                                 │
+                                                 ▼
+                                    ┌─────────────────────────────────┐
+                                    │        inventory.json           │
+                                    │   (serial, hostname, mgmt_ip)   │
+                                    └────────────┬────────────────────┘
+                                                 │
+CLI → Daemon → Worker Pool → Upgrade Manager ────┘
+                    │              │
+                    │              ▼
+              Command Queue   Direct Firewall Connections
+                    │         (mgmt_ip + credentials)
+                    │              │
+                    ▼              ▼
+              Status Files    All Operations:
+                              - System info, HA state
+                              - Pre/post-flight validation
+                              - Software check/download
+                              - Install, reboot
 ```
+
+**Connection Flow:**
+1. **Discovery**: Panorama → `inventory.json` (one-time or periodic refresh)
+2. **Operations**: Direct to firewalls using management IPs from inventory
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
@@ -53,8 +81,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 - **Python**: 3.11 or higher
 - **Operating System**: Linux only
-- **Access**: Panorama API key with appropriate permissions
-- **Network**: Connectivity to Panorama server
+- **Panorama Access**: API key for device discovery
+- **Firewall Access**: Username/password credentials for direct connections
+- **Network**: Connectivity to Panorama (for discovery) and firewall management IPs (for operations)
 
 ## Installation
 
@@ -99,9 +128,13 @@ This creates the directory structure:
 ### 3. Configure
 
 ```bash
-# Set Panorama connection
+# Set Panorama connection (for device discovery)
 panos-upgrade config set panorama.host panorama.example.com
 panos-upgrade config set panorama.api_key YOUR_API_KEY_HERE
+
+# Set firewall credentials (for direct connections)
+panos-upgrade config set firewall.username admin
+panos-upgrade config set firewall.password YOUR_FIREWALL_PASSWORD
 
 # Configure workers (optional)
 panos-upgrade config set workers.max 10
@@ -110,7 +143,17 @@ panos-upgrade config set workers.max 10
 panos-upgrade config set panorama.rate_limit 10
 ```
 
-### 4. Set Up Upgrade Paths
+### 4. Discover Devices
+
+Before running any upgrades, you must discover devices from Panorama:
+
+```bash
+panos-upgrade device discover
+```
+
+This queries Panorama for connected devices and saves their management IPs to `inventory.json`. This step is required before any upgrade or download operations.
+
+### 5. Set Up Upgrade Paths
 
 Copy the example and customize:
 
@@ -280,11 +323,19 @@ Every command logs which source was used at INFO level:
 2025-11-26 10:00:00 - panos_upgrade - INFO - Work directory: /home/user/opt/panosupgrade (from ~/.panos-upgrade.config.json)
 ```
 
-### Panorama Settings
+### Panorama Settings (for device discovery)
 - `panorama.host` - Panorama hostname
 - `panorama.api_key` - API key for authentication
 - `panorama.rate_limit` - API requests per minute (default: 10)
 - `panorama.timeout` - API timeout in seconds (default: 300)
+
+### Firewall Settings (for direct connections)
+- `firewall.username` - Username for firewall authentication
+- `firewall.password` - Password for firewall authentication
+- `firewall.timeout` - API timeout in seconds (default: 300)
+- `firewall.software_check_timeout` - Timeout for software check command (default: 90)
+- `firewall.software_info_timeout` - Timeout for software info command (default: 120)
+- `firewall.max_reboot_poll_interval` - Max interval between reboot status checks (default: 300)
 
 ### Worker Settings
 - `workers.max` - Maximum worker threads (1-50, default: 5)
@@ -303,31 +354,41 @@ Every command logs which source was used at INFO level:
 
 ## Upgrade Process
 
-1. **Pre-flight Validation**
+All operations connect **directly to firewalls** using management IPs from the device inventory.
+
+1. **Lookup Device**
+   - Get management IP from `inventory.json`
+   - Connect directly to firewall using firewall credentials
+
+2. **Pre-flight Validation**
    - Check available disk space (must meet minimum)
    - Collect baseline metrics (TCP sessions, routes, ARP)
    - Skip if current version not in upgrade paths
 
-2. **Download**
-   - Check if image already downloaded (skip if present)
-   - Download software image to device if needed
-   - Monitor download progress
+3. **Software Check**
+   - Run `request system software check` to refresh available versions
 
-3. **Install**
+4. **Download**
+   - Check if image already downloaded (skip if present)
+   - Download software image directly to firewall if needed
+   - Monitor download progress via job status
+
+5. **Install**
    - Install software on device
    - Wait for installation to complete
 
-4. **Reboot**
+6. **Reboot**
    - Reboot device
    - Wait for device to come back online (up to 10 minutes)
+   - Uses exponential backoff polling
 
-5. **Post-flight Validation**
+7. **Post-flight Validation**
    - Collect metrics again
    - Compare with pre-flight baseline
    - Log differences for admin review
 
-6. **Multi-version Path**
-   - Repeat steps 1-5 for each version in upgrade path
+8. **Multi-version Path**
+   - Repeat steps 2-7 for each version in upgrade path
    - Update device status after each version
 
 ## Documentation
@@ -337,6 +398,17 @@ Every command logs which source was used at INFO level:
 - [Examples](examples/) - Configuration and job examples
 
 ## Troubleshooting
+
+### Device Not Found in Inventory
+**Cause**: Device discovery hasn't been run or device not connected to Panorama  
+**Solution**: Run `panos-upgrade device discover` to refresh inventory
+
+### Cannot Connect to Firewall
+**Cause**: Firewall management IP not reachable or credentials incorrect  
+**Solution**: 
+- Verify firewall management IP is accessible from the daemon host
+- Check `firewall.username` and `firewall.password` settings
+- Ensure firewall API access is enabled
 
 ### Device Skipped
 **Cause**: Current version not found in upgrade_paths.json  
@@ -349,10 +421,6 @@ Every command logs which source was used at INFO level:
 ### Validation Failed
 **Cause**: Metrics outside acceptable margins  
 **Solution**: Review validation results, adjust margins if appropriate
-
-### Rate Limiting
-**Cause**: Too many API requests to Panorama  
-**Solution**: Reduce `panorama.rate_limit` or `workers.max`
 
 ### Daemon Won't Start
 **Cause**: Permission issues or missing directories  

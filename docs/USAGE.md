@@ -12,14 +12,21 @@ python scripts/init_system.py
 
 ## Configuration
 
-### 1. Set Panorama Connection
+### 1. Set Panorama Connection (for device discovery)
 
 ```bash
 panos-upgrade config set panorama.host panorama.example.com
 panos-upgrade config set panorama.api_key YOUR_API_KEY
 ```
 
-### 2. Configure Upgrade Paths
+### 2. Set Firewall Credentials (for direct connections)
+
+```bash
+panos-upgrade config set firewall.username admin
+panos-upgrade config set firewall.password YOUR_PASSWORD
+```
+
+### 3. Configure Upgrade Paths
 
 Edit `/var/lib/panos-upgrade/config/upgrade_paths.json`:
 
@@ -30,7 +37,17 @@ Edit `/var/lib/panos-upgrade/config/upgrade_paths.json`:
 }
 ```
 
-### 3. Adjust Settings (Optional)
+### 4. Discover Devices
+
+Before running any upgrades, discover devices from Panorama:
+
+```bash
+panos-upgrade device discover
+```
+
+This queries Panorama for connected devices and saves their management IPs to `inventory.json`. This step is **required** before any upgrade or download operations.
+
+### 5. Adjust Settings (Optional)
 
 ```bash
 # Set number of worker threads (1-50)
@@ -180,24 +197,34 @@ Create a command file in `/var/lib/panos-upgrade/commands/incoming/`:
 
 ## Upgrade Process Flow
 
-1. **Pre-flight Validation**
+All operations connect **directly to firewalls** using management IPs from the device inventory.
+
+1. **Lookup Device**
+   - Get management IP from `inventory.json`
+   - Connect directly to firewall
+
+2. **Pre-flight Validation**
    - Check disk space
    - Collect TCP sessions, routes, ARP entries
    - Verify minimum requirements
 
-2. **Download**
-   - Download software image
+3. **Software Check**
+   - Refresh available software versions
+
+4. **Download**
+   - Check if image already downloaded (skip if present)
+   - Download software image directly to firewall
    - Monitor download progress
 
-3. **Install**
+5. **Install**
    - Install software
    - Wait for installation to complete
 
-4. **Reboot**
+6. **Reboot**
    - Reboot device
-   - Wait for device to come online
+   - Wait for device to come online (exponential backoff)
 
-5. **Post-flight Validation**
+7. **Post-flight Validation**
    - Collect metrics again
    - Compare with pre-flight
    - Log differences
@@ -248,20 +275,37 @@ Adjust validation margins if needed:
 panos-upgrade config set validation.tcp_session_margin 10.0
 ```
 
-### Rate Limiting
+### Cannot Connect to Firewall
 
-If experiencing rate limit issues with Panorama:
+If experiencing connection issues to firewalls:
+
+1. Verify firewall management IP is accessible from the daemon host
+2. Check firewall credentials are correct:
+   ```bash
+   panos-upgrade config set firewall.username admin
+   panos-upgrade config set firewall.password YOUR_PASSWORD
+   ```
+3. Ensure firewall API access is enabled
+4. Check network/firewall rules between daemon host and firewall management IPs
+
+### Device Not Found in Inventory
+
+If you see "Device not found in inventory" errors:
 
 ```bash
-panos-upgrade config set panorama.rate_limit 5
+panos-upgrade device discover
 ```
+
+This refreshes the inventory from Panorama.
 
 ## Best Practices
 
-1. **Test with Dry Run**: Always test with `--dry-run` first
-2. **Start Small**: Begin with a few devices to validate the process
-3. **Monitor Logs**: Keep an eye on logs during upgrades
-4. **Backup Configuration**: Ensure Panorama backups are current
-5. **Maintenance Windows**: Schedule upgrades during maintenance windows
-6. **HA Pairs**: Always upgrade HA pairs together to maintain consistency
+1. **Discover First**: Always run `panos-upgrade device discover` before upgrades
+2. **Test with Dry Run**: Always test with `--dry-run` first
+3. **Start Small**: Begin with a few devices to validate the process
+4. **Monitor Logs**: Keep an eye on logs during upgrades
+5. **Backup Configuration**: Ensure Panorama backups are current
+6. **Maintenance Windows**: Schedule upgrades during maintenance windows
+7. **HA Pairs**: Always upgrade HA pairs together to maintain consistency
+8. **Network Access**: Ensure daemon host can reach all firewall management IPs
 

@@ -22,17 +22,19 @@ Download-only mode allows you to pre-stage PAN-OS software images on firewalls w
 
 ### Connection Flow
 
-**Normal Upgrade:**
+Both normal upgrades and download-only mode now use direct firewall connections:
+
+**Device Discovery (one-time):**
 ```
-CLI → Daemon → Panorama → (proxy) → Firewall
+CLI → Panorama (show devices connected) → inventory.json
 ```
 
-**Download-Only:**
+**All Operations (normal upgrade or download-only):**
 ```
-CLI → Daemon → Panorama (device discovery only)
-              ↓
-          Direct → Firewall (mgmt_ip) for downloads
+CLI → Daemon → inventory.json (lookup mgmt_ip) → Direct → Firewall
 ```
+
+Panorama is **only** used for device discovery. All other operations connect directly to firewalls.
 
 ### Workflow
 
@@ -458,7 +460,8 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `firewall.software_check_timeout` | 60 | Timeout (seconds) for `request system software check` |
+| `firewall.software_check_timeout` | 90 | Timeout (seconds) for `request system software check` |
+| `firewall.software_info_timeout` | 120 | Timeout (seconds) for `request system software info` |
 | `validation.min_disk_gb` | 5.0 | Minimum disk space required |
 
 ## Web Integration
@@ -526,12 +529,12 @@ panos-upgrade job submit --device 001234567890
 
 | Feature | Normal Upgrade | Download-Only |
 |---------|---------------|---------------|
-| Connection | Via Panorama | Direct to firewall |
+| Connection | Direct to firewall | Direct to firewall |
 | Operations | Download + Install + Reboot | Download only |
 | Validation | Full (sessions, routes, ARP) | Disk space only |
 | Skip Detection | Yes (skips existing) | Yes (skips existing) |
 | Duration | ~25 min per device | ~5 min per device |
-| Panorama Load | High | Low (discovery only) |
+| Panorama Usage | Discovery only | Discovery only |
 | Use Case | Complete upgrade | Pre-staging |
 
 ## FAQ

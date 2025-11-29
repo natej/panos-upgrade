@@ -2,14 +2,20 @@
 
 ## Overview
 
-The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates firmware upgrades for PAN-OS devices through Panorama. It features concurrent processing, comprehensive validation, and web application integration through JSON file-based communication.
+The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates firmware upgrades for PAN-OS devices. It features concurrent processing, comprehensive validation, and web application integration through JSON file-based communication.
+
+**Key Architecture Decision:** The application uses a two-tier connection model:
+- **Panorama** is used only for device discovery (`show devices connected`)
+- **Direct firewall connections** are used for all operations (upgrades, downloads, validation)
+
+This design reduces Panorama load and provides more reliable, direct control over firewall operations.
 
 ## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLI Interface                            │
-│  (Click-based commands: daemon, job, device, config, path)      │
+│  (Click-based commands: daemon, job, device, config, download)  │
 └────────────────────────┬────────────────────────────────────────┘
                          │
 ┌────────────────────────┴────────────────────────────────────────┐
@@ -27,27 +33,68 @@ The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates f
 │  │  • Version Path Management                                │  │
 │  │  • Standalone Device Upgrades                             │  │
 │  │  • HA Pair Upgrades (Passive First)                       │  │
+│  │  • Download-Only Mode                                     │  │
 │  │  • Cancellation Handling                                  │  │
 │  │  • Dry-Run Mode                                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────┬────────────────────────────────────────┘
                          │
-        ┌────────────────┼────────────────┐
-        │                │                │
-┌───────┴──────┐  ┌──────┴──────┐  ┌─────┴──────┐
-│  Panorama    │  │ Validation  │  │   Logging  │
-│   Client     │  │   System    │  │   System   │
-│              │  │             │  │            │
-│ • API Calls  │  │ • Pre-flight│  │ • JSON     │
-│ • Rate Limit │  │ • Post-flight│ │ • Text     │
-│ • Serial#    │  │ • Comparison│  │            │
-└──────────────┘  └─────────────┘  └────────────┘
-        │
-        │
-┌───────┴──────────────────────────────────────────┐
-│              Panorama Server                      │
-│  (Proxies commands to individual firewalls)      │
-└──────────────────────────────────────────────────┘
+        ┌────────────────┼────────────────┬──────────────┐
+        │                │                │              │
+┌───────┴──────┐  ┌──────┴──────┐  ┌─────┴──────┐  ┌────┴─────────┐
+│  Panorama    │  │   Direct    │  │ Validation │  │   Logging    │
+│   Client     │  │  Firewall   │  │   System   │  │   System     │
+│              │  │   Client    │  │            │  │              │
+│ • Discovery  │  │             │  │ • Pre-flight│ │ • JSON       │
+│   only       │  │ • All ops   │  │ • Post-flight││ • Text       │
+│              │  │ • Downloads │  │ • Comparison│ │              │
+└──────────────┘  │ • Install   │  └────────────┘  └──────────────┘
+        │         │ • Reboot    │         │
+        │         │ • Metrics   │         │
+        ▼         └──────┬──────┘         │
+┌──────────────┐         │                │
+│   Panorama   │         │                │
+│   Server     │         │                │
+│              │         │                │
+│ show devices │         │                │
+│ connected    │         │                │
+└──────────────┘         │                │
+                         ▼                │
+              ┌──────────────────────┐    │
+              │      Firewalls       │◄───┘
+              │  (Direct mgmt_ip     │
+              │   connections)       │
+              └──────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     Device Inventory                             │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  inventory.json                                           │  │
+│  │  • serial → mgmt_ip mapping                               │  │
+│  │  • Populated by device discovery                          │  │
+│  │  • Consulted before all operations                        │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Connection Flow
+
+### Device Discovery (Panorama)
+
+```
+1. CLI: panos-upgrade device discover
+2. Panorama Client: show devices connected
+3. Response: serial, hostname, mgmt_ip, version, model
+4. Save to: inventory.json
+```
+
+### All Operations (Direct Firewall)
+
+```
+1. Job submitted with serial number
+2. Lookup mgmt_ip from inventory.json
+3. Create DirectFirewallClient(mgmt_ip, username, password)
+4. Execute operations directly on firewall
 ```
 
 ## Core Components
@@ -111,37 +158,61 @@ The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates f
 - `cancel_upgrade()`: Graceful cancellation
 
 **Upgrade Flow**:
-1. Load device info and current version
-2. Lookup upgrade path from configuration
-3. Skip if version not found
-4. For each version in path:
-   - Pre-flight validation
-   - Download software
-   - Install software
-   - Reboot device
-   - Post-flight validation
-5. Update status throughout
+1. Lookup mgmt_ip from inventory.json
+2. Connect directly to firewall
+3. Get device info and current version
+4. Lookup upgrade path from configuration
+5. Skip if version not found
+6. For each version in path:
+   - Pre-flight validation (direct)
+   - Software check (direct)
+   - Download software (direct, skip if present)
+   - Install software (direct)
+   - Reboot device (direct)
+   - Wait for device ready (direct, exponential backoff)
+   - Post-flight validation (direct)
+7. Update status throughout
 
 ### 5. Panorama Client (`panorama_client.py`)
 
-**Purpose**: Interface with Panorama API
+**Purpose**: Interface with Panorama API for device discovery only
 
 **Key Methods**:
-- `get_device_info()`: Device information
-- `get_ha_state()`: HA status
-- `get_system_metrics()`: Validation metrics
-- `download_software()`: Initiate download
-- `install_software()`: Initiate installation
-- `reboot_device()`: Reboot command
-- `check_device_ready()`: Post-reboot check
+- `get_connected_devices()`: Query all connected devices
 
 **Features**:
 - Rate limiting integration
-- Serial number targeting
 - XML response parsing
-- Error handling and retries
+- Error handling
 
-### 6. Validation System (`validation.py`)
+> **Note:** This client is now only used for device discovery. All other operations use the DirectFirewallClient.
+
+### 6. Direct Firewall Client (`direct_firewall_client.py`)
+
+**Purpose**: Direct connection to individual firewalls for all operations
+
+**Key Methods**:
+- `get_system_info()`: Device information (hostname, serial, version)
+- `get_ha_state()`: HA status
+- `get_system_metrics()`: Validation metrics (sessions, routes, ARP, disk)
+- `check_software_updates()`: Refresh available software versions
+- `get_software_info()`: Query downloaded/available versions
+- `download_software()`: Initiate download (returns job ID)
+- `wait_for_download()`: Monitor download progress
+- `install_software()`: Initiate installation (returns job ID)
+- `wait_for_install()`: Monitor installation progress
+- `reboot_device()`: Reboot command
+- `check_device_ready()`: Post-reboot check with exponential backoff
+- `check_disk_space()`: Available disk space
+
+**Features**:
+- Username/password authentication
+- Rate limiting integration
+- XML response parsing
+- Job-based async operation monitoring
+- Progress callbacks for UI updates
+
+### 7. Validation System (`validation.py`)
 
 **Purpose**: Pre-flight and post-flight validation
 
@@ -162,7 +233,7 @@ The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates f
 - Routes: Added/removed route detection
 - ARP entries: Added/removed entry detection
 
-### 7. Configuration Management (`config.py`)
+### 8. Configuration Management (`config.py`)
 
 **Purpose**: Application configuration
 
@@ -174,13 +245,14 @@ The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates f
 - Type conversion for known values
 
 **Configuration Sections**:
-- `panorama`: Connection settings
+- `panorama`: Panorama connection settings (for discovery)
+- `firewall`: Firewall credentials (for direct connections)
 - `workers`: Thread pool settings
 - `validation`: Validation thresholds
 - `logging`: Log settings
 - `paths`: File system paths
 
-### 8. Logging System (`logging_config.py`)
+### 9. Logging System (`logging_config.py`)
 
 **Purpose**: Dual logging (JSON + text)
 
@@ -321,21 +393,24 @@ The PAN-OS Upgrade Manager is a daemon-based CLI application that orchestrates f
 ## HA Pair Upgrade Logic
 
 ```
-1. Query HA state for both devices
+1. Lookup mgmt_ip for both devices from inventory
+   → Connect directly to each firewall
+
+2. Query HA state for both devices (direct)
    → Determine active and passive members
 
-2. Upgrade passive member first
-   → Full upgrade cycle
+3. Upgrade passive member first
+   → Full upgrade cycle (all operations direct)
    → Validation
 
-3. Optional failover
+4. Optional failover
    → Can be configured
 
-4. Upgrade former active member
-   → Full upgrade cycle
+5. Upgrade former active member
+   → Full upgrade cycle (all operations direct)
    → Validation
 
-5. Complete HA pair upgrade
+6. Complete HA pair upgrade
    → Both members on target version
 ```
 
@@ -371,7 +446,8 @@ When `dry_run=True`:
 ### Scalability
 - Handles 230+ devices efficiently
 - Configurable worker threads (up to 50)
-- Rate limiting prevents Panorama overload
+- Direct firewall connections reduce Panorama load
+- Rate limiting available for API calls
 - Queue-based processing prevents memory issues
 
 ### Optimization
@@ -382,11 +458,13 @@ When `dry_run=True`:
 
 ## Security Considerations
 
-1. **API Key Storage**: Encrypted in configuration
-2. **File Permissions**: Restricted to service user
-3. **Audit Logging**: Complete operation trail
-4. **Rate Limiting**: Prevents API abuse
-5. **Input Validation**: All user inputs validated
+1. **Panorama API Key**: Stored in configuration (for discovery only)
+2. **Firewall Credentials**: Username/password stored in configuration
+3. **File Permissions**: Restricted to service user
+4. **Audit Logging**: Complete operation trail
+5. **Rate Limiting**: Prevents API abuse
+6. **Input Validation**: All user inputs validated
+7. **Direct Connections**: Firewall management IPs must be accessible
 
 ## Extension Points
 

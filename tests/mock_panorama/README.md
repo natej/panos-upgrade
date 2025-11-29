@@ -2,6 +2,8 @@
 
 A stateful simulation server for testing PAN-OS upgrades without touching production firewalls.
 
+> **Note:** The PAN-OS Upgrade Manager now uses direct firewall connections for all operations except device discovery. This mock server simulates both Panorama (for `show devices connected`) and direct firewall connections (for all other operations). The same server endpoint handles both types of requests.
+
 ## Features
 
 - ✅ **Realistic API Responses** - XML responses matching PAN-OS format
@@ -12,6 +14,7 @@ A stateful simulation server for testing PAN-OS upgrades without touching produc
 - ✅ **Fast Testing** - Configurable timing (fast for tests, realistic for demos)
 - ✅ **YAML Configuration** - Easy scenario setup
 - ✅ **SQLite Persistence** - State persists across restarts
+- ✅ **Direct Firewall Simulation** - Simulates direct firewall API responses
 
 ## Installation
 
@@ -43,8 +46,13 @@ Server will start on `http://localhost:8443`
 ### 2. Configure PAN-OS Upgrade Manager
 
 ```bash
+# Panorama connection (for device discovery)
 panos-upgrade config set panorama.host localhost:8443
 panos-upgrade config set panorama.api_key test-api-key
+
+# Firewall credentials (for direct connections - mock uses same endpoint)
+panos-upgrade config set firewall.username admin
+panos-upgrade config set firewall.password admin
 ```
 
 ### 3. Run Upgrades
