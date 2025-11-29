@@ -53,7 +53,8 @@ class Config:
                 "password": "",
                 "timeout": constants.DEFAULT_TIMEOUT,
                 "software_check_timeout": constants.DEFAULT_SOFTWARE_CHECK_TIMEOUT,
-                "software_info_timeout": constants.DEFAULT_SOFTWARE_INFO_TIMEOUT
+                "software_info_timeout": constants.DEFAULT_SOFTWARE_INFO_TIMEOUT,
+                "max_reboot_poll_interval": constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL
             },
             "workers": {
                 "max": constants.DEFAULT_WORKERS,
@@ -207,6 +208,11 @@ class Config:
     def software_info_timeout(self) -> int:
         """Get timeout for software info command in seconds."""
         return self.get("firewall.software_info_timeout", constants.DEFAULT_SOFTWARE_INFO_TIMEOUT)
+    
+    @property
+    def max_reboot_poll_interval(self) -> int:
+        """Get maximum poll interval when waiting for device reboot in seconds."""
+        return self.get("firewall.max_reboot_poll_interval", constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL)
 
 
 # Global config instance

@@ -502,4 +502,313 @@ class DirectFirewallClient:
                 f"Software check failed or timed out on {self.mgmt_ip}, continuing anyway: {e}"
             )
             return False
+    
+    def get_system_info(self) -> Dict[str, Any]:
+        """
+        Get system information from the firewall.
+        
+        Returns:
+            Dictionary with system information including:
+            - hostname: Device hostname
+            - serial: Serial number
+            - sw_version: Software version
+            - model: Device model
+            - ip_address: Management IP
+        """
+        self.logger.debug(f"Getting system info from {self.mgmt_ip}")
+        
+        try:
+            cmd = "<show><system><info></info></system></show>"
+            result = self._op_command(cmd)
+            
+            info = {}
+            if result is not None:
+                info['hostname'] = result.findtext('.//hostname', '')
+                info['serial'] = result.findtext('.//serial', '')
+                info['sw_version'] = result.findtext('.//sw-version', '')
+                info['model'] = result.findtext('.//model', '')
+                info['ip_address'] = result.findtext('.//ip-address', '')
+            
+            return info
+        except Exception as e:
+            self.logger.error(f"Failed to get system info from {self.mgmt_ip}: {e}")
+            raise
+    
+    def get_ha_state(self) -> Dict[str, Any]:
+        """
+        Get HA state for the firewall.
+        
+        Returns:
+            Dictionary with HA state information including:
+            - enabled: Whether HA is enabled
+            - local_state: Local HA state (active/passive/standalone)
+            - peer_state: Peer HA state
+            - local_serial: Local serial number
+            - peer_serial: Peer serial number
+        """
+        self.logger.debug(f"Getting HA state from {self.mgmt_ip}")
+        
+        try:
+            cmd = "<show><high-availability><state></state></high-availability></show>"
+            result = self._op_command(cmd)
+            
+            ha_info = {}
+            if result is not None:
+                ha_info['enabled'] = result.findtext('.//enabled', 'no')
+                ha_info['local_state'] = result.findtext('.//local-info/state', 'standalone')
+                ha_info['peer_state'] = result.findtext('.//peer-info/state', '')
+                ha_info['local_serial'] = result.findtext('.//local-info/serial-num', '')
+                ha_info['peer_serial'] = result.findtext('.//peer-info/serial-num', '')
+            
+            return ha_info
+        except Exception as e:
+            self.logger.error(f"Failed to get HA state from {self.mgmt_ip}: {e}")
+            raise
+    
+    def install_software(self, version: str) -> Optional[str]:
+        """
+        Install software version on the firewall.
+        
+        Args:
+            version: Software version to install
+            
+        Returns:
+            Job ID if installation initiated successfully, None on failure
+        """
+        self.logger.info(f"Installing version {version} on {self.mgmt_ip}")
+        
+        try:
+            cmd = f"<request><system><software><install><version>{version}</version></install></software></system></request>"
+            result = self._op_command(cmd)
+            
+            if result is not None:
+                # Response contains a job ID for the async install
+                job_id = result.findtext('.//job', '')
+                if job_id:
+                    self.logger.info(f"Installation initiated for {version} on {self.mgmt_ip} (job: {job_id})")
+                    return job_id
+                
+                # Check for error message
+                msg = result.findtext('.//msg', '') or result.findtext('.//line', '')
+                if msg:
+                    self.logger.error(f"Installation failed for {version}: {msg}")
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to install software on {self.mgmt_ip}: {e}")
+            raise
+    
+    def wait_for_install(
+        self,
+        job_id: str,
+        version: str,
+        timeout: int = 1800,
+        progress_callback: Optional[callable] = None
+    ) -> bool:
+        """
+        Wait for installation job to complete.
+        
+        Args:
+            job_id: Job ID returned from install_software()
+            version: Software version being installed (for logging)
+            timeout: Maximum time to wait in seconds
+            progress_callback: Optional callback function(progress_percent: int)
+            
+        Returns:
+            True if installation completed successfully
+        """
+        self.logger.info(f"Waiting for install job {job_id} ({version}) on {self.mgmt_ip}")
+        
+        start_time = time.time()
+        poll_interval = 10
+        last_progress = -1
+        
+        while time.time() - start_time < timeout:
+            try:
+                status = self.check_job_status(job_id)
+                job_status = status.get('status', 'UNKNOWN')
+                job_result = status.get('result', '')
+                progress_str = status.get('progress', '0')
+                
+                try:
+                    progress = int(progress_str)
+                except (ValueError, TypeError):
+                    progress = 0
+                
+                self.logger.debug(
+                    f"Install job {job_id} status: {job_status}, result: {job_result}, progress: {progress}%"
+                )
+                
+                if progress_callback and progress != last_progress:
+                    try:
+                        progress_callback(progress)
+                    except Exception as e:
+                        self.logger.warning(f"Progress callback error: {e}")
+                    last_progress = progress
+                
+                if job_status == 'FIN':
+                    if job_result == 'OK':
+                        self.logger.info(f"Installation completed for {version} on {self.mgmt_ip}")
+                        return True
+                    else:
+                        details = status.get('details', 'Unknown error')
+                        self.logger.error(
+                            f"Installation failed for {version} on {self.mgmt_ip}: {details}"
+                        )
+                        return False
+                
+                if job_status in ('ACT', 'PEND'):
+                    time.sleep(poll_interval)
+                    continue
+                
+                self.logger.warning(f"Unknown job status: {job_status}")
+                time.sleep(poll_interval)
+                
+            except Exception as e:
+                self.logger.warning(f"Error checking install job status: {e}")
+                time.sleep(poll_interval)
+        
+        self.logger.error(
+            f"Install job {job_id} did not complete within {timeout} seconds on {self.mgmt_ip}"
+        )
+        return False
+    
+    def reboot_device(self) -> bool:
+        """
+        Reboot the firewall.
+        
+        Returns:
+            True if reboot initiated successfully
+        """
+        self.logger.info(f"Rebooting device {self.mgmt_ip}")
+        
+        try:
+            cmd = "<request><restart><system></system></restart></request>"
+            result = self._op_command(cmd)
+            
+            if result is not None:
+                self.logger.info(f"Reboot initiated for {self.mgmt_ip}")
+                return True
+            
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to reboot device {self.mgmt_ip}: {e}")
+            raise
+    
+    def check_device_ready(
+        self,
+        timeout: int = 600,
+        max_poll_interval: int = 300
+    ) -> bool:
+        """
+        Check if device is ready after reboot.
+        
+        Uses exponential backoff with a maximum poll interval to handle
+        the 5-10 minute reboot time.
+        
+        Args:
+            timeout: Maximum time to wait in seconds (default 10 minutes)
+            max_poll_interval: Maximum interval between polls in seconds (default 5 minutes)
+            
+        Returns:
+            True if device is ready
+        """
+        self.logger.info(f"Waiting for device {self.mgmt_ip} to be ready")
+        
+        start_time = time.time()
+        poll_interval = 10  # Start with 10 seconds
+        backoff_factor = 1.5
+        
+        while time.time() - start_time < timeout:
+            try:
+                # Clear any cached xapi connection since device is rebooting
+                self._xapi = None
+                
+                # Try to get system info - this will fail if device is rebooting
+                info = self.get_system_info()
+                
+                if info and info.get('hostname'):
+                    self.logger.info(
+                        f"Device {self.mgmt_ip} is ready and responding "
+                        f"(hostname: {info.get('hostname')}, version: {info.get('sw_version')})"
+                    )
+                    return True
+                    
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "rebooting" in error_msg:
+                    self.logger.debug(f"Device {self.mgmt_ip} still rebooting...")
+                else:
+                    self.logger.debug(f"Device {self.mgmt_ip} not ready yet: {e}")
+            
+            # Wait before next poll
+            time.sleep(poll_interval)
+            
+            # Increase poll interval with backoff, but cap at max_poll_interval
+            poll_interval = min(poll_interval * backoff_factor, max_poll_interval)
+        
+        self.logger.error(f"Device {self.mgmt_ip} did not become ready within {timeout} seconds")
+        return False
+    
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """
+        Get system metrics for validation (pre-flight and post-flight checks).
+        
+        Returns:
+            Dictionary with system metrics including:
+            - tcp_sessions: Active TCP session count
+            - routes: List of routing table entries
+            - route_count: Number of routes
+            - arp_entries: List of ARP entries
+            - arp_count: Number of ARP entries
+            - disk_available_gb: Available disk space in GB
+        """
+        self.logger.debug(f"Getting system metrics from {self.mgmt_ip}")
+        
+        metrics = {}
+        
+        try:
+            # Get TCP session count
+            cmd = "<show><session><info></info></session></show>"
+            result = self._op_command(cmd)
+            if result is not None:
+                metrics['tcp_sessions'] = int(result.findtext('.//num-active', '0'))
+            
+            # Get routing table
+            cmd = "<show><routing><route></route></routing></show>"
+            result = self._op_command(cmd)
+            routes = []
+            if result is not None:
+                for entry in result.findall('.//entry'):
+                    route = {
+                        'destination': entry.findtext('destination', ''),
+                        'gateway': entry.findtext('nexthop', ''),
+                        'interface': entry.findtext('interface', '')
+                    }
+                    routes.append(route)
+            metrics['routes'] = routes
+            metrics['route_count'] = len(routes)
+            
+            # Get ARP table
+            cmd = "<show><arp><entry name='all'/></arp></show>"
+            result = self._op_command(cmd)
+            arp_entries = []
+            if result is not None:
+                for entry in result.findall('.//entry'):
+                    arp = {
+                        'ip': entry.findtext('ip', ''),
+                        'mac': entry.findtext('mac', ''),
+                        'interface': entry.findtext('interface', '')
+                    }
+                    arp_entries.append(arp)
+            metrics['arp_entries'] = arp_entries
+            metrics['arp_count'] = len(arp_entries)
+            
+            # Get disk space
+            metrics['disk_available_gb'] = self.check_disk_space()
+            
+            return metrics
+        except Exception as e:
+            self.logger.error(f"Failed to get system metrics from {self.mgmt_ip}: {e}")
+            raise
 

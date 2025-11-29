@@ -3,8 +3,10 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from panos_upgrade.validation import ValidationSystem, ValidationMetrics
+from panos_upgrade.validation import ValidationSystem
+from panos_upgrade.models import ValidationMetrics
 from panos_upgrade.panorama_client import PanoramaClient
+from panos_upgrade.direct_firewall_client import DirectFirewallClient
 from tests.helpers import MockPanXapi
 from tests.helpers.xml_loader import (
     generate_disk_space_response,
@@ -227,3 +229,134 @@ class TestMetricsComparison:
         result = validation_system._compare_metrics(pre_metrics, post_metrics)
         
         assert result["routes"].difference == 1
+
+
+class TestDirectValidation:
+    """Test validation using direct firewall connections."""
+    
+    @pytest.fixture
+    def validation_system(self, mock_xapi, test_config, test_work_dir):
+        """Create validation system with mocked panorama client."""
+        panorama = PanoramaClient(config=test_config, xapi=mock_xapi)
+        return ValidationSystem(test_config, panorama)
+    
+    def test_pre_flight_direct_passes_with_sufficient_disk(self, mock_xapi, validation_system, test_config):
+        """Should pass pre-flight via direct connection when disk space is sufficient."""
+        # Create a direct firewall client with mock
+        firewall_client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        # Mock all required responses for direct connection
+        mock_xapi.add_response(
+            "show.session.info",
+            generate_session_info_response(tcp_sessions=1000)
+        )
+        mock_xapi.add_response(
+            "show.routing.route",
+            generate_routing_table_response()
+        )
+        mock_xapi.add_response(
+            "show.arp",
+            generate_arp_table_response()
+        )
+        mock_xapi.add_response(
+            "show.system.disk-space",
+            generate_disk_space_response(panrepo_available_gb=15.0)
+        )
+        
+        passed, metrics, error = validation_system.run_pre_flight_validation_direct(
+            "001234567890", firewall_client
+        )
+        
+        assert passed == True
+        assert not error
+        assert metrics.disk_available_gb == 15.0
+    
+    def test_pre_flight_direct_fails_with_insufficient_disk(self, mock_xapi, validation_system, test_config):
+        """Should fail pre-flight via direct connection when disk space is insufficient."""
+        # Set minimum disk requirement
+        test_config._config["validation"]["min_disk_gb"] = 10.0
+        
+        firewall_client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        mock_xapi.add_response(
+            "show.session.info",
+            generate_session_info_response(tcp_sessions=1000)
+        )
+        mock_xapi.add_response(
+            "show.routing.route",
+            generate_routing_table_response()
+        )
+        mock_xapi.add_response(
+            "show.arp",
+            generate_arp_table_response()
+        )
+        mock_xapi.add_response(
+            "show.system.disk-space",
+            generate_disk_space_response(panrepo_available_gb=5.0)  # Less than 10.0 required
+        )
+        
+        passed, metrics, error = validation_system.run_pre_flight_validation_direct(
+            "001234567890", firewall_client
+        )
+        
+        assert passed == False
+        assert "disk space" in error.lower()
+    
+    def test_post_flight_direct_compares_metrics(self, mock_xapi, validation_system):
+        """Should run post-flight validation via direct connection and compare metrics."""
+        firewall_client = DirectFirewallClient(
+            mgmt_ip="10.0.0.1",
+            username="test",
+            password="test",
+            xapi=mock_xapi
+        )
+        
+        # Pre-flight metrics (stored earlier)
+        # Note: tcp_sessions comes from num-active which includes TCP+UDP+ICMP
+        # Default generate_session_info_response gives: tcp=1000 + udp=500 + icmp=50 = 1550
+        # Default generate_routing_table_response gives 3 routes
+        # Default generate_arp_table_response gives 3 entries
+        pre_metrics = ValidationMetrics(
+            tcp_sessions=1550,  # Matches default total from generate_session_info_response
+            route_count=3,      # Matches default from generate_routing_table_response
+            routes=[],
+            arp_count=3,        # Matches default from generate_arp_table_response
+            arp_entries=[],
+            disk_available_gb=15.0
+        )
+        
+        # Mock post-flight responses - use default values which match pre_metrics
+        mock_xapi.add_response(
+            "show.session.info",
+            generate_session_info_response()  # Default: 1000+500+50 = 1550 total
+        )
+        mock_xapi.add_response(
+            "show.routing.route",
+            generate_routing_table_response()  # Default: 3 routes
+        )
+        mock_xapi.add_response(
+            "show.arp",
+            generate_arp_table_response()  # Default: 3 entries
+        )
+        mock_xapi.add_response(
+            "show.system.disk-space",
+            generate_disk_space_response(panrepo_available_gb=12.0)
+        )
+        
+        passed, result = validation_system.run_post_flight_validation_direct(
+            "001234567890", firewall_client, pre_metrics
+        )
+        
+        assert passed == True
+        assert result.post_flight is not None
+        assert result.comparison is not None

@@ -91,6 +91,39 @@ class UpgradeManager:
         """
         return self.upgrade_paths.get(current_version)
     
+    def _get_mgmt_ip_from_inventory(self, serial: str) -> Optional[str]:
+        """
+        Get management IP for a device from inventory.
+        
+        Args:
+            serial: Device serial number
+            
+        Returns:
+            Management IP address or None if not found
+        """
+        self.inventory.reload()
+        device_info = self.inventory.get_device(serial)
+        if device_info:
+            return device_info.get("mgmt_ip", "")
+        return None
+    
+    def _create_firewall_client(self, mgmt_ip: str) -> DirectFirewallClient:
+        """
+        Create a new DirectFirewallClient for the given management IP.
+        
+        Args:
+            mgmt_ip: Firewall management IP address
+            
+        Returns:
+            DirectFirewallClient instance
+        """
+        return DirectFirewallClient(
+            mgmt_ip=mgmt_ip,
+            username=self.config.firewall_username,
+            password=self.config.firewall_password,
+            rate_limiter=None
+        )
+    
     def upgrade_device(
         self,
         serial: str,
@@ -114,8 +147,22 @@ class UpgradeManager:
         device_status = self._init_device_status(serial, job_id)
         
         try:
-            # Get device info
-            device_info = self.panorama.get_device_info(serial)
+            # Get management IP from inventory
+            mgmt_ip = self._get_mgmt_ip_from_inventory(serial)
+            if not mgmt_ip:
+                msg = f"Device {serial} not found in inventory or has no management IP. Run 'panos-upgrade device discover' first"
+                self.logger.error(msg)
+                device_status.upgrade_status = UpgradeStatus.FAILED.value
+                device_status.upgrade_message = msg
+                device_status.add_error("init", msg)
+                self._save_device_status(device_status)
+                return False, msg
+            
+            # Create direct firewall client
+            firewall_client = self._create_firewall_client(mgmt_ip)
+            
+            # Get device info via direct connection
+            device_info = firewall_client.get_system_info()
             device_status.hostname = device_info.get('hostname', serial)
             device_status.current_version = device_info.get('sw_version', '')
             device_status.ha_role = HARole.STANDALONE.value
@@ -136,8 +183,8 @@ class UpgradeManager:
             device_status.target_version = upgrade_path[-1] if upgrade_path else ""
             self._save_device_status(device_status)
             
-            # Execute upgrade through path
-            success = self._execute_upgrade_path(device_status, job_id, dry_run)
+            # Execute upgrade through path (pass mgmt_ip for direct connections)
+            success = self._execute_upgrade_path(device_status, job_id, dry_run, mgmt_ip)
             
             if success:
                 device_status.upgrade_status = UpgradeStatus.COMPLETE.value
@@ -186,9 +233,26 @@ class UpgradeManager:
         )
         
         try:
-            # Determine which is passive
-            ha_state_primary = self.panorama.get_ha_state(primary_serial)
-            ha_state_secondary = self.panorama.get_ha_state(secondary_serial)
+            # Get management IPs from inventory
+            primary_mgmt_ip = self._get_mgmt_ip_from_inventory(primary_serial)
+            secondary_mgmt_ip = self._get_mgmt_ip_from_inventory(secondary_serial)
+            
+            if not primary_mgmt_ip:
+                msg = f"Device {primary_serial} not found in inventory or has no management IP"
+                self.logger.error(msg)
+                return False, msg
+            
+            if not secondary_mgmt_ip:
+                msg = f"Device {secondary_serial} not found in inventory or has no management IP"
+                self.logger.error(msg)
+                return False, msg
+            
+            # Determine which is passive via direct connection
+            primary_client = self._create_firewall_client(primary_mgmt_ip)
+            secondary_client = self._create_firewall_client(secondary_mgmt_ip)
+            
+            ha_state_primary = primary_client.get_ha_state()
+            ha_state_secondary = secondary_client.get_ha_state()
             
             primary_state = ha_state_primary.get('local_state', 'unknown')
             secondary_state = ha_state_secondary.get('local_state', 'unknown')
@@ -232,7 +296,8 @@ class UpgradeManager:
         self,
         device_status: DeviceStatus,
         job_id: str,
-        dry_run: bool
+        dry_run: bool,
+        mgmt_ip: str
     ) -> bool:
         """
         Execute upgrade through version path.
@@ -241,6 +306,7 @@ class UpgradeManager:
             device_status: Device status object
             job_id: Job identifier
             dry_run: Whether this is a dry run
+            mgmt_ip: Management IP for direct firewall connection
             
         Returns:
             True if successful
@@ -265,7 +331,7 @@ class UpgradeManager:
             )
             
             # Execute single version upgrade
-            success = self._upgrade_to_version(device_status, target_version, job_id, dry_run)
+            success = self._upgrade_to_version(device_status, target_version, job_id, dry_run, mgmt_ip)
             
             if not success:
                 return False
@@ -277,7 +343,8 @@ class UpgradeManager:
         device_status: DeviceStatus,
         target_version: str,
         job_id: str,
-        dry_run: bool
+        dry_run: bool,
+        mgmt_ip: str
     ) -> bool:
         """
         Upgrade device to a specific version.
@@ -287,11 +354,15 @@ class UpgradeManager:
             target_version: Target version
             job_id: Job identifier
             dry_run: Whether this is a dry run
+            mgmt_ip: Management IP for direct firewall connection
             
         Returns:
             True if successful
         """
         serial = device_status.serial
+        
+        # Create direct firewall client for this operation
+        firewall_client = self._create_firewall_client(mgmt_ip)
         
         try:
             # Phase 1: Pre-flight validation
@@ -306,7 +377,9 @@ class UpgradeManager:
                 device_status.upgrade_message = f"[DRY RUN] Would validate {serial} before upgrading to {target_version}"
                 self._save_device_status(device_status)
             else:
-                passed, metrics, error = self.validation.run_pre_flight_validation(serial)
+                passed, metrics, error = self.validation.run_pre_flight_validation_direct(
+                    serial, firewall_client
+                )
                 
                 if not passed:
                     device_status.add_error(UpgradePhase.PRE_FLIGHT.value, error)
@@ -332,7 +405,7 @@ class UpgradeManager:
                     self.logger.info(f"[DRY RUN] Would refresh software version list on {serial}")
                 else:
                     software_check_timeout = self.config.software_check_timeout
-                    success = self.panorama.check_software_updates(serial, timeout=software_check_timeout)
+                    success = firewall_client.check_software_updates(timeout=software_check_timeout)
                     if not success:
                         self.logger.warning(
                             f"Software check failed or timed out on {serial}, continuing anyway"
@@ -353,8 +426,15 @@ class UpgradeManager:
                 self._save_device_status(device_status)
                 time.sleep(2)  # Simulate download
             else:
-                # Check if version is already downloaded
-                already_downloaded = self._is_version_downloaded(serial, target_version)
+                # Check if version is already downloaded via direct connection
+                software_info = firewall_client.get_software_info(
+                    timeout=self.config.software_info_timeout
+                )
+                already_downloaded = False
+                for sw in software_info.get("versions", []):
+                    if sw.get("version") == target_version and sw.get("downloaded", "no").lower() == "yes":
+                        already_downloaded = True
+                        break
                 
                 if already_downloaded:
                     self.logger.info(
@@ -367,18 +447,35 @@ class UpgradeManager:
                     device_status.upgrade_message = f"Downloading version {target_version}"
                     self._save_device_status(device_status)
                     
-                    success = self.panorama.download_software(serial, target_version)
-                    if not success:
+                    job_id_download = firewall_client.download_software(target_version)
+                    if not job_id_download:
                         error = f"Failed to initiate download of {target_version}"
                         device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
                         self._save_device_status(device_status)
                         return False
                     
                     # Wait for download to complete
-                    self._wait_for_download(serial, device_status)
+                    device_status.upgrade_message = f"Downloading {target_version} (job {job_id_download})..."
+                    self._save_device_status(device_status)
+                    
+                    def update_download_progress(progress: int):
+                        device_status.progress = 30 + int(progress * 0.25)  # 30-55% range
+                        device_status.upgrade_message = f"Downloading {target_version}: {progress}%"
+                        self._save_device_status(device_status)
+                    
+                    success = firewall_client.wait_for_download(
+                        job_id_download, target_version, timeout=1800,
+                        progress_callback=update_download_progress
+                    )
+                    if not success:
+                        error = f"Download of {target_version} failed or did not complete"
+                        device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
+                        self._save_device_status(device_status)
+                        return False
+                    
                     device_status.downloaded_versions.append(target_version)
             
-            # Phase 3: Install
+            # Phase 4: Install
             device_status.current_phase = UpgradePhase.INSTALL.value
             device_status.upgrade_status = UpgradeStatus.INSTALLING.value
             device_status.progress = 60
@@ -391,17 +488,33 @@ class UpgradeManager:
                 self._save_device_status(device_status)
                 time.sleep(2)  # Simulate install
             else:
-                success = self.panorama.install_software(serial, target_version)
-                if not success:
+                job_id_install = firewall_client.install_software(target_version)
+                if not job_id_install:
                     error = f"Failed to initiate installation of {target_version}"
                     device_status.add_error(UpgradePhase.INSTALL.value, error)
                     self._save_device_status(device_status)
                     return False
                 
-                # Wait for installation
-                time.sleep(60)  # Installation takes time
+                # Wait for installation to complete
+                device_status.upgrade_message = f"Installing {target_version} (job {job_id_install})..."
+                self._save_device_status(device_status)
+                
+                def update_install_progress(progress: int):
+                    device_status.progress = 60 + int(progress * 0.15)  # 60-75% range
+                    device_status.upgrade_message = f"Installing {target_version}: {progress}%"
+                    self._save_device_status(device_status)
+                
+                success = firewall_client.wait_for_install(
+                    job_id_install, target_version, timeout=1800,
+                    progress_callback=update_install_progress
+                )
+                if not success:
+                    error = f"Installation of {target_version} failed or did not complete"
+                    device_status.add_error(UpgradePhase.INSTALL.value, error)
+                    self._save_device_status(device_status)
+                    return False
             
-            # Phase 4: Reboot
+            # Phase 5: Reboot
             device_status.current_phase = UpgradePhase.REBOOT.value
             device_status.upgrade_status = UpgradeStatus.REBOOTING.value
             device_status.progress = 75
@@ -414,19 +527,22 @@ class UpgradeManager:
                 self._save_device_status(device_status)
                 time.sleep(2)  # Simulate reboot
             else:
-                success = self.panorama.reboot_device(serial)
+                success = firewall_client.reboot_device()
                 if not success:
                     error = "Failed to initiate reboot"
                     device_status.add_error(UpgradePhase.REBOOT.value, error)
                     self._save_device_status(device_status)
                     return False
                 
-                # Wait for device to come back
+                # Wait for device to come back (create new client after reboot)
                 self.logger.info(f"Waiting for {serial} to reboot and come back online...")
                 device_status.upgrade_message = f"Waiting for device to come back online after reboot"
                 self._save_device_status(device_status)
                 
-                ready = self.panorama.check_device_ready(serial, timeout=600)
+                # Create new client for checking device ready (connection will be reset)
+                reboot_client = self._create_firewall_client(mgmt_ip)
+                max_poll_interval = self.config.max_reboot_poll_interval
+                ready = reboot_client.check_device_ready(timeout=600, max_poll_interval=max_poll_interval)
                 if not ready:
                     error = "Device did not come back online after reboot"
                     device_status.add_error(UpgradePhase.REBOOT.value, error)
@@ -438,8 +554,11 @@ class UpgradeManager:
                 device_status.upgrade_message = f"Device is back online, stabilizing..."
                 self._save_device_status(device_status)
                 time.sleep(10)  # Give device time to fully initialize
+                
+                # Update firewall_client reference for post-flight
+                firewall_client = reboot_client
             
-            # Phase 5: Post-flight validation
+            # Phase 6: Post-flight validation
             device_status.current_phase = UpgradePhase.POST_FLIGHT.value
             device_status.progress = 90
             device_status.upgrade_message = f"Running post-flight validation for version {target_version}"
@@ -453,7 +572,9 @@ class UpgradeManager:
                 # Get pre-flight metrics
                 pre_metrics = self.validation.get_latest_pre_flight_metrics(serial)
                 if pre_metrics:
-                    passed, result = self.validation.run_post_flight_validation(serial, pre_metrics)
+                    passed, result = self.validation.run_post_flight_validation_direct(
+                        serial, firewall_client, pre_metrics
+                    )
                     
                     if not passed:
                         self.logger.warning(
@@ -475,60 +596,6 @@ class UpgradeManager:
             self._save_device_status(device_status)
             return False
     
-    def _wait_for_download(self, serial: str, device_status: DeviceStatus):
-        """Wait for software download to complete."""
-        max_wait = 1800  # 30 minutes
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait:
-            try:
-                status = self.panorama.check_download_status(serial)
-                downloading = status.get('downloading', 'no')
-                
-                if downloading.lower() == 'no':
-                    self.logger.info(f"Download completed for {serial}")
-                    return
-                
-                # Update progress if available
-                progress_str = status.get('progress', '0')
-                try:
-                    progress = int(progress_str.rstrip('%'))
-                    device_status.progress = 30 + int(progress * 0.3)  # 30-60% range
-                    self._save_device_status(device_status)
-                except ValueError:
-                    pass
-                
-                time.sleep(30)
-            except Exception as e:
-                self.logger.warning(f"Error checking download status: {e}")
-                time.sleep(30)
-        
-        raise TimeoutError(f"Download did not complete within {max_wait} seconds")
-    
-    def _is_version_downloaded(self, serial: str, version: str) -> bool:
-        """
-        Check if a software version is already downloaded on the device.
-        
-        Args:
-            serial: Device serial number
-            version: Software version to check
-            
-        Returns:
-            True if version is already downloaded
-        """
-        try:
-            software_info = self.panorama.get_software_info(serial)
-            
-            for sw in software_info.get("versions", []):
-                if sw.get("version") == version and sw.get("downloaded", "no").lower() == "yes":
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.warning(f"Could not check if {version} is downloaded on {serial}: {e}")
-            # If we can't check, assume not downloaded and proceed with download
-            return False
     
     def _init_device_status(self, serial: str, job_id: str) -> DeviceStatus:
         """Initialize device status."""

@@ -10,7 +10,8 @@
     "password": "YOUR_FIREWALL_PASSWORD",
     "timeout": 300,
     "software_check_timeout": 90,
-    "software_info_timeout": 120
+    "software_info_timeout": 120,
+    "max_reboot_poll_interval": 300
   },
   "workers": {
     "max": 5,
