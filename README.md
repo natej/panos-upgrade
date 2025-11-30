@@ -48,13 +48,15 @@ This application provides a robust, production-ready solution for upgrading PAN-
                                     ┌─────────────────────────────────┐
                                     │         Device Discovery        │
                                     │   (Panorama: show devices       │
-                                    │    connected)                   │
+                                    │    connected + HA state query)  │
                                     └────────────┬────────────────────┘
                                                  │
                                                  ▼
                                     ┌─────────────────────────────────┐
                                     │        inventory.json           │
-                                    │   (serial, hostname, mgmt_ip)   │
+                                    │   (serial, hostname, mgmt_ip,   │
+                                    │    device_type, peer_serial,    │
+                                    │    ha_state)                    │
                                     └────────────┬────────────────────┘
                                                  │
 CLI → Daemon → Worker Pool → Upgrade Manager ────┘
@@ -151,9 +153,36 @@ Before running any upgrades, you must discover devices from Panorama:
 panos-upgrade device discover
 ```
 
-This queries Panorama for connected devices and saves their management IPs to `inventory.json`. This step is required before any upgrade or download operations.
+This queries Panorama for connected devices, connects to each firewall to determine HA state, and saves the information to `inventory.json`. This step is required before any upgrade or download operations.
 
-### 5. Set Up Upgrade Paths
+**Discovery captures:**
+- Serial number, hostname, management IP, software version, model
+- Device type: `standalone`, `ha_pair`, or `unknown`
+- HA state: `active`, `passive`, `standalone`, or `unknown`
+- Peer serial (for HA pair members)
+
+### 5. Export Devices to CSV (Optional)
+
+After discovery, you can export devices to CSV files for use with bulk commands:
+
+```bash
+# Export to current directory
+panos-upgrade device export
+
+# Export to specific directory
+panos-upgrade device export --output-dir /tmp
+
+# Custom filenames
+panos-upgrade device export --standalone-file standalone.csv --ha-pairs-file pairs.csv
+```
+
+This creates two CSV files:
+- **standalone_devices.csv**: Standalone devices with columns: `serial`, `hostname`, `mgmt_ip`, `current_version`, `model`
+- **ha_pairs.csv**: HA pairs with columns: `serial_1`, `serial_2`, `hostname_1`, `hostname_2`, `mgmt_ip_1`, `mgmt_ip_2`, `current_version_1`, `current_version_2`, `model`
+
+The HA pairs CSV orders devices with the active member as `serial_1`.
+
+### 6. Set Up Upgrade Paths
 
 Copy the example and customize:
 

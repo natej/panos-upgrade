@@ -477,7 +477,12 @@ def metrics(ctx, serial):
 @device.command()
 @click.pass_context
 def discover(ctx):
-    """Discover devices from Panorama and update inventory."""
+    """Discover devices from Panorama and update inventory.
+    
+    This command queries Panorama for connected devices and then connects
+    directly to each firewall to determine its HA state (standalone, active,
+    or passive).
+    """
     from panos_upgrade.device_inventory import DeviceInventory
     from panos_upgrade.panorama_client import PanoramaClient
     from panos_upgrade import constants
@@ -491,23 +496,193 @@ def discover(ctx):
         # Create clients
         panorama = PanoramaClient(config)
         inventory_file = config.get_path("devices/inventory.json")
-        inventory = DeviceInventory(inventory_file, panorama)
+        inventory = DeviceInventory(
+            inventory_file, 
+            panorama,
+            firewall_username=config.firewall_username,
+            firewall_password=config.firewall_password
+        )
+        
+        # Progress callback to show status
+        def progress_callback(current: int, total: int, message: str):
+            click.echo(f"\r  Querying device {current}/{total}: {message}", nl=False)
+            if current == total:
+                click.echo()  # Newline after last device
         
         # Discover devices
-        stats = inventory.discover_devices()
+        stats = inventory.discover_devices(progress_callback=progress_callback)
         
         click.echo(f"\n✓ Discovery complete:")
         click.echo(f"  Total devices: {stats['total']}")
         click.echo(f"  New devices: {stats['new']}")
         click.echo(f"  Updated devices: {stats['updated']}")
+        click.echo(f"  Standalone: {stats['standalone']}")
+        click.echo(f"  HA pair members: {stats['ha_pair']}")
+        if stats['unknown'] > 0:
+            click.echo(f"  Unknown (HA query failed): {stats['unknown']}")
         click.echo(f"\nInventory saved to: {inventory_file}")
         
         logger.info(f"Device discovery complete: {stats['total']} devices")
         
     except Exception as e:
-        click.echo(f"Error discovering devices: {e}", err=True)
+        click.echo(f"\nError discovering devices: {e}", err=True)
         logger.error(f"Device discovery failed: {e}", exc_info=True)
         sys.exit(1)
+
+
+@device.command(name='export')
+@click.option('--output-dir', default='.', help='Output directory for CSV files')
+@click.option('--standalone-file', default='standalone_devices.csv', help='Filename for standalone devices CSV')
+@click.option('--ha-pairs-file', default='ha_pairs.csv', help='Filename for HA pairs CSV')
+@click.pass_context
+def export_devices(ctx, output_dir, standalone_file, ha_pairs_file):
+    """Export devices from inventory to CSV files.
+    
+    Creates two CSV files:
+    - Standalone devices CSV with columns: serial, hostname, mgmt_ip, current_version, model
+    - HA pairs CSV with columns: serial_1, serial_2, hostname_1, hostname_2, 
+      mgmt_ip_1, mgmt_ip_2, current_version_1, current_version_2, model
+    
+    The HA pairs CSV orders devices with the active member as serial_1.
+    
+    Example usage:
+    
+        panos-upgrade device export
+        panos-upgrade device export --output-dir /tmp
+        panos-upgrade device export --standalone-file standalone.csv --ha-pairs-file pairs.csv
+    """
+    import csv
+    from pathlib import Path
+    from panos_upgrade.device_inventory import (
+        DeviceInventory, DEVICE_TYPE_STANDALONE, DEVICE_TYPE_HA_PAIR, 
+        DEVICE_TYPE_UNKNOWN, HA_STATE_ACTIVE
+    )
+    from panos_upgrade.panorama_client import PanoramaClient
+    
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
+    
+    # Load inventory
+    inventory_file = config.get_path("devices/inventory.json")
+    panorama = PanoramaClient(config)
+    inventory = DeviceInventory(
+        inventory_file, 
+        panorama,
+        firewall_username=config.firewall_username,
+        firewall_password=config.firewall_password
+    )
+    
+    devices = inventory.list_devices()
+    if not devices:
+        click.echo("No devices in inventory. Run 'panos-upgrade device discover' first.", err=True)
+        sys.exit(1)
+    
+    click.echo(f"Exporting {len(devices)} devices from inventory...")
+    
+    # Separate devices by type
+    standalone_devices = []
+    ha_devices = {}  # serial -> device info
+    unknown_devices = []
+    
+    for device in devices:
+        device_type = device.get('device_type', DEVICE_TYPE_UNKNOWN)
+        
+        if device_type == DEVICE_TYPE_STANDALONE:
+            standalone_devices.append(device)
+        elif device_type == DEVICE_TYPE_HA_PAIR:
+            ha_devices[device['serial']] = device
+        else:
+            # Unknown devices go to standalone CSV with warning
+            unknown_devices.append(device)
+    
+    # Group HA devices into pairs
+    ha_pairs = []
+    processed_serials = set()
+    orphaned_ha_devices = []
+    
+    for serial, device in ha_devices.items():
+        if serial in processed_serials:
+            continue
+        
+        peer_serial = device.get('peer_serial', '')
+        if peer_serial and peer_serial in ha_devices:
+            peer_device = ha_devices[peer_serial]
+            
+            # Determine order: active device first
+            if device.get('ha_state') == HA_STATE_ACTIVE:
+                ha_pairs.append((device, peer_device))
+            else:
+                ha_pairs.append((peer_device, device))
+            
+            processed_serials.add(serial)
+            processed_serials.add(peer_serial)
+        else:
+            # Peer not in inventory - orphaned HA device
+            orphaned_ha_devices.append(device)
+            processed_serials.add(serial)
+    
+    # Create output directory if needed
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    standalone_path = output_path / standalone_file
+    ha_pairs_path = output_path / ha_pairs_file
+    
+    # Write standalone CSV (includes unknown and orphaned devices)
+    all_standalone = standalone_devices + unknown_devices + orphaned_ha_devices
+    
+    with open(standalone_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['serial', 'hostname', 'mgmt_ip', 'current_version', 'model'])
+        for device in all_standalone:
+            writer.writerow([
+                device.get('serial', ''),
+                device.get('hostname', ''),
+                device.get('mgmt_ip', ''),
+                device.get('current_version', ''),
+                device.get('model', '')
+            ])
+    
+    # Write HA pairs CSV
+    with open(ha_pairs_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'serial_1', 'serial_2', 
+            'hostname_1', 'hostname_2', 
+            'mgmt_ip_1', 'mgmt_ip_2', 
+            'current_version_1', 'current_version_2', 
+            'model'
+        ])
+        for device_1, device_2 in ha_pairs:
+            writer.writerow([
+                device_1.get('serial', ''),
+                device_2.get('serial', ''),
+                device_1.get('hostname', ''),
+                device_2.get('hostname', ''),
+                device_1.get('mgmt_ip', ''),
+                device_2.get('mgmt_ip', ''),
+                device_1.get('current_version', ''),
+                device_2.get('current_version', ''),
+                device_1.get('model', '')  # Assume same model for HA pair
+            ])
+    
+    # Display summary
+    click.echo(f"\n✓ Export complete:")
+    click.echo(f"  Standalone devices: {len(standalone_devices)} → {standalone_path}")
+    click.echo(f"  HA pairs: {len(ha_pairs)} ({len(ha_pairs) * 2} devices) → {ha_pairs_path}")
+    
+    if unknown_devices:
+        click.echo(f"  Unknown devices: {len(unknown_devices)} (included in standalone)")
+    
+    if orphaned_ha_devices:
+        click.echo(f"  Orphaned HA devices: {len(orphaned_ha_devices)} (peer not in inventory, included in standalone)")
+        for device in orphaned_ha_devices:
+            click.echo(f"    - {device.get('serial')} (peer: {device.get('peer_serial')})")
+    
+    logger.info(
+        f"Device export complete: {len(all_standalone)} standalone, "
+        f"{len(ha_pairs)} HA pairs"
+    )
 
 
 # ============================================================================
@@ -718,7 +893,12 @@ def _process_csv_jobs(ctx, csv_file: str, dry_run: bool, download_only: bool):
     # Load inventory for mgmt_ip lookup
     inventory_file = config.get_path("devices/inventory.json")
     panorama = PanoramaClient(config)
-    inventory = DeviceInventory(inventory_file, panorama)
+    inventory = DeviceInventory(
+        inventory_file, 
+        panorama,
+        firewall_username=config.firewall_username,
+        firewall_password=config.firewall_password
+    )
     
     # Load upgrade paths
     upgrade_paths = safe_read_json(config.upgrade_paths_file, default={})
@@ -938,7 +1118,12 @@ def upgrade_ha_pairs(ctx, csv_file, dry_run):
     # Load inventory for mgmt_ip lookup
     inventory_file = config.get_path("devices/inventory.json")
     panorama = PanoramaClient(config)
-    inventory = DeviceInventory(inventory_file, panorama)
+    inventory = DeviceInventory(
+        inventory_file, 
+        panorama,
+        firewall_username=config.firewall_username,
+        firewall_password=config.firewall_password
+    )
     
     # Load upgrade paths
     upgrade_paths = safe_read_json(config.upgrade_paths_file, default={})

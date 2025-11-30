@@ -92,7 +92,12 @@ class UpgradeDaemon:
         
         # Initialize device inventory
         inventory_file = self.config.get_path("devices/inventory.json")
-        self.device_inventory = DeviceInventory(inventory_file, self.panorama_client)
+        self.device_inventory = DeviceInventory(
+            inventory_file, 
+            self.panorama_client,
+            firewall_username=self.config.firewall_username,
+            firewall_password=self.config.firewall_password
+        )
         
         # Initialize upgrade manager
         self.upgrade_manager = UpgradeManager(
