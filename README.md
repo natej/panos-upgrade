@@ -83,7 +83,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 - **Python**: 3.11 or higher
 - **Operating System**: Linux only
-- **Panorama Access**: API key for device discovery
+- **Panorama Access**: Username/password (preferred) or API key for device discovery
 - **Firewall Access**: Username/password credentials for direct connections
 - **Network**: Connectivity to Panorama (for discovery) and firewall management IPs (for operations)
 
@@ -132,7 +132,13 @@ This creates the directory structure:
 ```bash
 # Set Panorama connection (for device discovery)
 panos-upgrade config set panorama.host panorama.example.com
-panos-upgrade config set panorama.api_key YOUR_API_KEY_HERE
+
+# Option 1: Username/password authentication (preferred)
+panos-upgrade config set panorama.username admin
+panos-upgrade config set panorama.password YOUR_PANORAMA_PASSWORD
+
+# Option 2: API key authentication (if username/password not set)
+# panos-upgrade config set panorama.api_key YOUR_API_KEY_HERE
 
 # Set firewall credentials (for direct connections)
 panos-upgrade config set firewall.username admin
@@ -399,9 +405,13 @@ Every command logs which source was used at INFO level:
 
 ### Panorama Settings (for device discovery)
 - `panorama.host` - Panorama hostname
-- `panorama.api_key` - API key for authentication
+- `panorama.username` - Username for authentication (preferred)
+- `panorama.password` - Password for authentication (preferred)
+- `panorama.api_key` - API key for authentication (used if username/password not set)
 - `panorama.rate_limit` - API requests per minute (default: 10)
 - `panorama.timeout` - API timeout in seconds (default: 300)
+
+**Note:** If both `panorama.username/password` and `panorama.api_key` are configured, username/password takes priority.
 
 ### Firewall Settings (for direct connections)
 - `firewall.username` - Username for firewall authentication

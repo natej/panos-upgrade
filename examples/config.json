@@ -1,7 +1,9 @@
 {
   "panorama": {
     "host": "panorama.example.com",
-    "api_key": "YOUR_API_KEY_HERE",
+    "username": "admin",
+    "password": "YOUR_PANORAMA_PASSWORD",
+    "api_key": "",
     "rate_limit": 10,
     "timeout": 300
   },

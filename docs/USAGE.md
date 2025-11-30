@@ -16,8 +16,16 @@ python scripts/init_system.py
 
 ```bash
 panos-upgrade config set panorama.host panorama.example.com
-panos-upgrade config set panorama.api_key YOUR_API_KEY
+
+# Option 1: Username/password authentication (preferred)
+panos-upgrade config set panorama.username admin
+panos-upgrade config set panorama.password YOUR_PANORAMA_PASSWORD
+
+# Option 2: API key authentication (if username/password not set)
+# panos-upgrade config set panorama.api_key YOUR_API_KEY
 ```
+
+**Note:** If both username/password and API key are configured, username/password takes priority.
 
 ### 2. Set Firewall Credentials (for direct connections)
 

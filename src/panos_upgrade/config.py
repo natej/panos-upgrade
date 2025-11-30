@@ -44,6 +44,8 @@ class Config:
         return {
             "panorama": {
                 "host": "",
+                "username": "",
+                "password": "",
                 "api_key": "",
                 "rate_limit": constants.DEFAULT_RATE_LIMIT,
                 "timeout": constants.DEFAULT_TIMEOUT
@@ -162,6 +164,16 @@ class Config:
     def panorama_host(self) -> str:
         """Get Panorama host."""
         return self.get("panorama.host", "")
+    
+    @property
+    def panorama_username(self) -> str:
+        """Get Panorama username."""
+        return self.get("panorama.username", "")
+    
+    @property
+    def panorama_password(self) -> str:
+        """Get Panorama password."""
+        return self.get("panorama.password", "")
     
     @property
     def panorama_api_key(self) -> str:

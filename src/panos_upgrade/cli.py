@@ -723,13 +723,22 @@ def show(ctx):
     config = ctx.obj['config']
     
     click.echo("Current Configuration:")
-    click.echo(f"  Panorama Host: {config.panorama_host}")
-    click.echo(f"  API Key: {'*' * 20 if config.panorama_api_key else '(not set)'}")
-    click.echo(f"  Max Workers: {config.max_workers}")
-    click.echo(f"  Rate Limit: {config.rate_limit} req/min")
-    click.echo(f"  Min Disk Space: {config.min_disk_gb} GB")
-    click.echo(f"  Work Directory: {config.work_dir}")
-    click.echo(f"  Upgrade Paths File: {config.upgrade_paths_file}")
+    click.echo(f"\n  Panorama:")
+    click.echo(f"    Host: {config.panorama_host or '(not set)'}")
+    click.echo(f"    Username: {config.panorama_username or '(not set)'}")
+    click.echo(f"    Password: {'*' * 12 if config.panorama_password else '(not set)'}")
+    click.echo(f"    API Key: {'*' * 20 if config.panorama_api_key else '(not set)'}")
+    click.echo(f"\n  Firewall:")
+    click.echo(f"    Username: {config.firewall_username or '(not set)'}")
+    click.echo(f"    Password: {'*' * 12 if config.firewall_password else '(not set)'}")
+    click.echo(f"\n  Workers:")
+    click.echo(f"    Max Workers: {config.max_workers}")
+    click.echo(f"    Rate Limit: {config.rate_limit} req/min")
+    click.echo(f"\n  Validation:")
+    click.echo(f"    Min Disk Space: {config.min_disk_gb} GB")
+    click.echo(f"\n  Paths:")
+    click.echo(f"    Work Directory: {config.work_dir}")
+    click.echo(f"    Upgrade Paths File: {config.upgrade_paths_file}")
 
 
 # ============================================================================

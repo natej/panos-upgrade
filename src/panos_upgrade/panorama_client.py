@@ -34,16 +34,46 @@ class PanoramaClient:
                 # Mock server uses HTTP, production uses HTTPS
                 hostname = self.config.panorama_host
                 use_http = 'localhost' in hostname or '127.0.0.1' in hostname
+                timeout = self.config.get("panorama.timeout", 300)
                 
-                # pan-python uses 'use_http' parameter for HTTP connections
-                # Don't prepend http:// - let pan-python handle it
-                self._xapi = PanXapi(
-                    api_key=self.config.panorama_api_key,
-                    hostname=hostname,
-                    timeout=self.config.get("panorama.timeout", 300),
-                    use_http=use_http  # Tell pan-python to use HTTP instead of HTTPS
-                )
-                self.logger.info(f"Connected to Panorama: {self.config.panorama_host} (HTTP: {use_http})")
+                # Determine authentication method
+                # Priority: username/password first, then API key
+                panorama_username = self.config.panorama_username
+                panorama_password = self.config.panorama_password
+                panorama_api_key = self.config.panorama_api_key
+                
+                if panorama_username and panorama_password:
+                    # Use username/password authentication
+                    self._xapi = PanXapi(
+                        api_username=panorama_username,
+                        api_password=panorama_password,
+                        hostname=hostname,
+                        timeout=timeout,
+                        use_http=use_http
+                    )
+                    self.logger.info(
+                        f"Connected to Panorama: {hostname} "
+                        f"(auth: username/password, user: {panorama_username}, HTTP: {use_http})"
+                    )
+                elif panorama_api_key:
+                    # Fall back to API key authentication
+                    self._xapi = PanXapi(
+                        api_key=panorama_api_key,
+                        hostname=hostname,
+                        timeout=timeout,
+                        use_http=use_http
+                    )
+                    self.logger.info(
+                        f"Connected to Panorama: {hostname} "
+                        f"(auth: api_key, HTTP: {use_http})"
+                    )
+                else:
+                    # No authentication configured
+                    raise PanXapiError(
+                        "Panorama authentication not configured. "
+                        "Set either panorama.username/password or panorama.api_key in config."
+                    )
+                    
             except PanXapiError as e:
                 self.logger.error(f"Failed to connect to Panorama: {e}")
                 raise
