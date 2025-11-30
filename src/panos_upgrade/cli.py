@@ -643,10 +643,10 @@ def _read_csv_ha_pairs(csv_file: str) -> list:
     Read HA pairs from a CSV file.
     
     Args:
-        csv_file: Path to CSV file with 'primary_serial' and 'secondary_serial' columns
+        csv_file: Path to CSV file with 'serial_1' and 'serial_2' columns
         
     Returns:
-        List of tuples (primary_serial, secondary_serial)
+        List of tuples (serial_1, serial_2)
         
     Raises:
         click.ClickException: If CSV is invalid or missing required columns
@@ -661,17 +661,17 @@ def _read_csv_ha_pairs(csv_file: str) -> list:
             if not reader.fieldnames:
                 raise click.ClickException("CSV file is empty or has no headers")
             
-            if 'primary_serial' not in reader.fieldnames or 'secondary_serial' not in reader.fieldnames:
+            if 'serial_1' not in reader.fieldnames or 'serial_2' not in reader.fieldnames:
                 raise click.ClickException(
-                    f"CSV file must have 'primary_serial' and 'secondary_serial' columns. "
+                    f"CSV file must have 'serial_1' and 'serial_2' columns. "
                     f"Found columns: {', '.join(reader.fieldnames)}"
                 )
             
             for row in reader:
-                primary = row.get('primary_serial', '').strip()
-                secondary = row.get('secondary_serial', '').strip()
-                if primary and secondary:
-                    pairs.append((primary, secondary))
+                serial_1 = row.get('serial_1', '').strip()
+                serial_2 = row.get('serial_2', '').strip()
+                if serial_1 and serial_2:
+                    pairs.append((serial_1, serial_2))
     except FileNotFoundError:
         raise click.ClickException(f"CSV file not found: {csv_file}")
     except csv.Error as e:
@@ -895,12 +895,16 @@ def upgrade(ctx, csv_file, dry_run):
 def upgrade_ha_pairs(ctx, csv_file, dry_run):
     """Queue HA pairs for upgrade from a CSV file.
     
-    The CSV file must have 'primary_serial' and 'secondary_serial' columns.
+    The CSV file must have 'serial_1' and 'serial_2' columns.
     Other columns are ignored.
+    
+    Note: The column order does not matter - the upgrade process dynamically
+    discovers which device is active/passive and always upgrades the passive
+    member first.
     
     Example CSV:
     
-        primary_serial,secondary_serial,pair_name
+        serial_1,serial_2,pair_name
         001234567890,001234567891,dc1-pair
         001234567892,001234567893,dc2-pair
     
@@ -954,41 +958,41 @@ def upgrade_ha_pairs(ctx, csv_file, dry_run):
     skipped_no_path = []
     skipped_existing_job = []
     
-    for primary_serial, secondary_serial in pairs:
+    for serial_1, serial_2 in pairs:
         # Check if both devices are in inventory
-        primary_info = inventory.get_device(primary_serial)
-        secondary_info = inventory.get_device(secondary_serial)
+        info_1 = inventory.get_device(serial_1)
+        info_2 = inventory.get_device(serial_2)
         
-        if not primary_info:
+        if not info_1:
             results["skipped_not_in_inventory"] += 1
-            skipped_not_in_inventory.append(f"{primary_serial} (primary)")
-            logger.warning(f"Skipping pair: Primary {primary_serial} not in inventory")
+            skipped_not_in_inventory.append(serial_1)
+            logger.warning(f"Skipping pair: {serial_1} not in inventory")
             continue
         
-        if not secondary_info:
+        if not info_2:
             results["skipped_not_in_inventory"] += 1
-            skipped_not_in_inventory.append(f"{secondary_serial} (secondary)")
-            logger.warning(f"Skipping pair: Secondary {secondary_serial} not in inventory")
+            skipped_not_in_inventory.append(serial_2)
+            logger.warning(f"Skipping pair: {serial_2} not in inventory")
             continue
         
-        primary_hostname = primary_info.get("hostname", primary_serial)
-        primary_version = primary_info.get("current_version", "unknown")
+        # Use first device's version for upgrade path check
+        version_1 = info_1.get("current_version", "unknown")
         
-        # Check upgrade path (use primary's version)
-        if primary_version not in upgrade_paths:
+        # Check upgrade path
+        if version_1 not in upgrade_paths:
             results["skipped_no_path"] += 1
-            skipped_no_path.append(f"{primary_serial}/{secondary_serial}: version {primary_version}")
-            logger.info(f"Skipping pair: No path for {primary_version}")
+            skipped_no_path.append(f"{serial_1}/{serial_2}: version {version_1}")
+            logger.info(f"Skipping pair: No path for {version_1}")
             continue
         
         # Check for existing jobs on either device
         skip_pair = False
-        for serial in [primary_serial, secondary_serial]:
+        for serial in [serial_1, serial_2]:
             try:
                 _check_for_existing_job(config, serial, constants.JOB_TYPE_HA_PAIR)
             except (ActiveJobError, PendingJobError, Exception):
                 results["skipped_existing_job"] += 1
-                skipped_existing_job.append(f"{primary_serial}/{secondary_serial}")
+                skipped_existing_job.append(f"{serial_1}/{serial_2}")
                 logger.info(f"Skipping pair: {serial} already has job")
                 skip_pair = True
                 break
@@ -1003,7 +1007,7 @@ def upgrade_ha_pairs(ctx, csv_file, dry_run):
                 job_data = {
                     "job_id": job_id,
                     "type": constants.JOB_TYPE_HA_PAIR,
-                    "devices": [primary_serial, secondary_serial],
+                    "devices": [serial_1, serial_2],
                     "ha_pair_name": "",
                     "dry_run": False,
                     "download_only": False,
@@ -1015,17 +1019,17 @@ def upgrade_ha_pairs(ctx, csv_file, dry_run):
                 atomic_write_json(job_file, job_data)
                 
                 results["queued"] += 1
-                path_str = " → ".join(upgrade_paths[primary_version])
-                queued_pairs.append(f"{primary_serial}/{secondary_serial}: {primary_version} → {path_str}")
-                logger.info(f"Queued HA pair {primary_serial}/{secondary_serial} for upgrade")
+                path_str = " → ".join(upgrade_paths[version_1])
+                queued_pairs.append(f"{serial_1}/{serial_2}: {version_1} → {path_str}")
+                logger.info(f"Queued HA pair {serial_1}/{serial_2} for upgrade")
                 
             except Exception as e:
                 results["errors"] += 1
-                logger.error(f"Failed to queue pair {primary_serial}/{secondary_serial}: {e}")
+                logger.error(f"Failed to queue pair {serial_1}/{serial_2}: {e}")
         else:
             results["queued"] += 1
-            path_str = " → ".join(upgrade_paths[primary_version])
-            queued_pairs.append(f"{primary_serial}/{secondary_serial}: {primary_version} → {path_str}")
+            path_str = " → ".join(upgrade_paths[version_1])
+            queued_pairs.append(f"{serial_1}/{serial_2}: {version_1} → {path_str}")
     
     # Display results
     if dry_run:

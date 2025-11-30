@@ -95,51 +95,56 @@ class TestCSVHAPairParsing:
         """Create a valid HA pairs CSV file."""
         csv_file = tmp_path / "ha_pairs.csv"
         csv_file.write_text(
-            "primary_serial,secondary_serial,pair_name\n"
+            "serial_1,serial_2,pair_name\n"
             "001234567890,001234567891,dc1-pair\n"
             "001234567892,001234567893,dc2-pair\n"
         )
         return str(csv_file)
     
     @pytest.fixture
-    def csv_missing_primary(self, tmp_path):
-        """Create a CSV missing primary_serial column."""
+    def csv_missing_serial_1(self, tmp_path):
+        """Create a CSV missing serial_1 column."""
         csv_file = tmp_path / "bad_ha.csv"
-        csv_file.write_text("secondary_serial,pair_name\n001234567891,dc1-pair\n")
+        csv_file.write_text("serial_2,pair_name\n001234567891,dc1-pair\n")
         return str(csv_file)
     
     @pytest.fixture
-    def csv_missing_secondary(self, tmp_path):
-        """Create a CSV missing secondary_serial column."""
+    def csv_missing_serial_2(self, tmp_path):
+        """Create a CSV missing serial_2 column."""
         csv_file = tmp_path / "bad_ha.csv"
-        csv_file.write_text("primary_serial,pair_name\n001234567890,dc1-pair\n")
+        csv_file.write_text("serial_1,pair_name\n001234567890,dc1-pair\n")
         return str(csv_file)
     
     def test_reads_ha_pair_columns(self, valid_ha_csv):
-        """Should correctly read both serial columns from HA CSV."""
+        """Should correctly read both serial columns from HA CSV.
+        
+        Note: The column names serial_1 and serial_2 are just labels.
+        The actual active/passive HA state is discovered dynamically
+        when the upgrade job runs.
+        """
         import csv
         
         pairs = []
         with open(valid_ha_csv, 'r', newline='') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                primary = row.get('primary_serial', '').strip()
-                secondary = row.get('secondary_serial', '').strip()
-                if primary and secondary:
-                    pairs.append((primary, secondary))
+                serial_1 = row.get('serial_1', '').strip()
+                serial_2 = row.get('serial_2', '').strip()
+                if serial_1 and serial_2:
+                    pairs.append((serial_1, serial_2))
         
         assert len(pairs) == 2
         assert ("001234567890", "001234567891") in pairs
         assert ("001234567892", "001234567893") in pairs
     
-    def test_validates_required_columns(self, csv_missing_primary):
-        """Should detect missing primary_serial column."""
+    def test_validates_required_columns(self, csv_missing_serial_1):
+        """Should detect missing serial_1 column."""
         import csv
         
-        with open(csv_missing_primary, 'r', newline='') as f:
+        with open(csv_missing_serial_1, 'r', newline='') as f:
             reader = csv.DictReader(f)
-            assert 'primary_serial' not in reader.fieldnames
-            assert 'secondary_serial' in reader.fieldnames
+            assert 'serial_1' not in reader.fieldnames
+            assert 'serial_2' in reader.fieldnames
 
 
 class TestCSVEdgeCases:

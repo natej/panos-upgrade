@@ -118,9 +118,10 @@ panos-upgrade job submit --ha-pair 001234567890 001234567891
 ### Bulk HA Pairs from CSV
 
 ```bash
-# Create CSV with primary and secondary serials
+# Create CSV with both serials for each pair
+# Note: Column order doesn't matter - active/passive is discovered dynamically
 cat > ha_pairs.csv << EOF
-primary_serial,secondary_serial
+serial_1,serial_2
 001234567890,001234567891
 001234567892,001234567893
 EOF
