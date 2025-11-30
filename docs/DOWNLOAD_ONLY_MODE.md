@@ -96,30 +96,41 @@ Discovering devices from Panorama...
 Inventory saved to: /opt/panos-upgrade/devices/inventory.json
 ```
 
-### Step 2: Create CSV File with Device Serials
+### Step 2: Export Devices to CSV (Optional)
 
-Create a CSV file with the devices you want to download images for:
+After discovery, you can export devices to CSV files:
 
 ```bash
-cat > download_devices.csv << EOF
-serial,hostname,notes
-001234567890,fw-dc1-01,primary
-001234567891,fw-dc1-02,secondary
-001234567892,fw-dc2-01,standalone
-EOF
+panos-upgrade device export
 ```
 
-The CSV must have a `serial` column. Other columns are optional and ignored.
+This creates:
+- `standalone_devices.csv` - For standalone devices
+- `ha_pairs.csv` - For HA pairs (with `serial_1`, `serial_2` columns)
 
 ### Step 3: Queue Devices for Download
 
+**For standalone devices:**
+
 ```bash
 # Dry run first to see what would happen
-panos-upgrade download download_devices.csv --dry-run
+panos-upgrade download standalone_devices.csv --dry-run
 
 # Actually queue devices
-panos-upgrade download download_devices.csv
+panos-upgrade download standalone_devices.csv
 ```
+
+**For HA pairs:**
+
+```bash
+# Dry run first
+panos-upgrade download-ha-pairs ha_pairs.csv --dry-run
+
+# Actually queue both members of each pair
+panos-upgrade download-ha-pairs ha_pairs.csv
+```
+
+The `download-ha-pairs` command creates individual download-only jobs for each device in each pair.
 
 **Output:**
 ```

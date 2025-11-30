@@ -1261,6 +1261,198 @@ def upgrade_ha_pairs(ctx, csv_file, dry_run):
         click.echo(f"  panos-upgrade job list --status active")
 
 
+@main.command(name='download-ha-pairs')
+@click.argument('csv_file', type=click.Path(exists=True))
+@click.option('--dry-run', is_flag=True, help='Show what would be queued without creating jobs')
+@click.pass_context
+def download_ha_pairs(ctx, csv_file, dry_run):
+    """Queue HA pairs for download-only from a CSV file.
+    
+    This downloads PAN-OS images to both members of each HA pair without
+    performing upgrades. Use this to pre-stage images before maintenance windows.
+    
+    The CSV file must have 'serial_1' and 'serial_2' columns.
+    Other columns are ignored.
+    
+    Example CSV:
+    
+        serial_1,serial_2,pair_name
+        001234567890,001234567891,dc1-pair
+        001234567892,001234567893,dc2-pair
+    
+    Example usage:
+    
+        panos-upgrade download-ha-pairs ha_pairs.csv
+        panos-upgrade download-ha-pairs ha_pairs.csv --dry-run
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from panos_upgrade.device_inventory import DeviceInventory
+    from panos_upgrade.panorama_client import PanoramaClient
+    from panos_upgrade.utils.file_ops import atomic_write_json, safe_read_json
+    from panos_upgrade.exceptions import ActiveJobError, PendingJobError
+    from panos_upgrade import constants
+    
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
+    
+    click.echo(f"Processing {csv_file} for HA pair downloads...")
+    
+    # Read HA pairs from CSV
+    pairs = _read_csv_ha_pairs(csv_file)
+    
+    if not pairs:
+        click.echo("No HA pairs found in CSV file", err=True)
+        sys.exit(1)
+    
+    click.echo(f"Found {len(pairs)} HA pair(s) in CSV")
+    
+    # Load inventory for mgmt_ip lookup
+    inventory_file = config.get_path("devices/inventory.json")
+    panorama = PanoramaClient(config)
+    inventory = DeviceInventory(
+        inventory_file, 
+        panorama,
+        firewall_username=config.firewall_username,
+        firewall_password=config.firewall_password
+    )
+    
+    # Load upgrade paths
+    upgrade_paths = safe_read_json(config.upgrade_paths_file, default={})
+    
+    # Track results
+    results = {
+        "total_pairs": len(pairs),
+        "total_devices": len(pairs) * 2,
+        "queued_devices": 0,
+        "skipped_not_in_inventory": 0,
+        "skipped_no_path": 0,
+        "skipped_existing_job": 0,
+        "errors": 0
+    }
+    
+    queued_devices = []
+    skipped_not_in_inventory = []
+    skipped_no_path = []
+    skipped_existing_job = []
+    
+    for serial_1, serial_2 in pairs:
+        # Check if both devices are in inventory
+        info_1 = inventory.get_device(serial_1)
+        info_2 = inventory.get_device(serial_2)
+        
+        if not info_1:
+            results["skipped_not_in_inventory"] += 1
+            skipped_not_in_inventory.append(serial_1)
+            logger.warning(f"Skipping device: {serial_1} not in inventory")
+        
+        if not info_2:
+            results["skipped_not_in_inventory"] += 1
+            skipped_not_in_inventory.append(serial_2)
+            logger.warning(f"Skipping device: {serial_2} not in inventory")
+        
+        # Process each device in the pair independently for download-only
+        for serial, info in [(serial_1, info_1), (serial_2, info_2)]:
+            if not info:
+                continue
+            
+            hostname = info.get("hostname", serial)
+            current_version = info.get("current_version", "unknown")
+            
+            # Check upgrade path
+            if current_version not in upgrade_paths:
+                results["skipped_no_path"] += 1
+                skipped_no_path.append(f"{serial} ({hostname}): version {current_version}")
+                logger.info(f"Skipping {serial}: No path for {current_version}")
+                continue
+            
+            # Check for existing jobs
+            try:
+                _check_for_existing_job(config, serial, constants.JOB_TYPE_DOWNLOAD_ONLY)
+            except (ActiveJobError, PendingJobError, Exception):
+                results["skipped_existing_job"] += 1
+                skipped_existing_job.append(f"{serial} ({hostname})")
+                logger.info(f"Skipping {serial}: Already has job")
+                continue
+            
+            # Create download-only job
+            if not dry_run:
+                try:
+                    job_id = f"csv-ha-download-{uuid.uuid4()}"
+                    job_data = {
+                        "job_id": job_id,
+                        "type": constants.JOB_TYPE_DOWNLOAD_ONLY,
+                        "devices": [serial],
+                        "ha_pair_name": "",
+                        "dry_run": False,
+                        "download_only": True,
+                        "created_at": datetime.now(timezone.utc).isoformat() + "Z"
+                    }
+                    
+                    pending_dir = config.get_path(constants.DIR_QUEUE_PENDING)
+                    job_file = pending_dir / f"{job_id}.json"
+                    atomic_write_json(job_file, job_data)
+                    
+                    results["queued_devices"] += 1
+                    path_str = " → ".join(upgrade_paths[current_version])
+                    queued_devices.append(f"{serial} ({hostname}): {current_version} → {path_str}")
+                    logger.info(f"Queued {serial} for download-only")
+                    
+                except Exception as e:
+                    results["errors"] += 1
+                    logger.error(f"Failed to queue {serial}: {e}")
+            else:
+                results["queued_devices"] += 1
+                path_str = " → ".join(upgrade_paths[current_version])
+                queued_devices.append(f"{serial} ({hostname}): {current_version} → {path_str}")
+    
+    # Display results
+    if dry_run:
+        click.echo("\n[DRY RUN] Would queue for download-only:\n")
+    else:
+        click.echo("\nQueued for download-only:\n")
+    
+    if queued_devices:
+        for device in queued_devices[:10]:
+            click.echo(f"  {device}")
+        if len(queued_devices) > 10:
+            click.echo(f"  ... and {len(queued_devices) - 10} more")
+    
+    # Show skipped
+    if skipped_not_in_inventory:
+        click.echo("\nSkipped (not in inventory):")
+        for item in skipped_not_in_inventory:
+            click.echo(f"  {item}")
+    
+    if skipped_no_path:
+        click.echo("\nSkipped (no upgrade path):")
+        for item in skipped_no_path[:5]:
+            click.echo(f"  {item}")
+        if len(skipped_no_path) > 5:
+            click.echo(f"  ... and {len(skipped_no_path) - 5} more")
+    
+    if skipped_existing_job:
+        click.echo("\nSkipped (existing job):")
+        for item in skipped_existing_job[:5]:
+            click.echo(f"  {item}")
+        if len(skipped_existing_job) > 5:
+            click.echo(f"  ... and {len(skipped_existing_job) - 5} more")
+    
+    # Summary
+    click.echo(f"\nSummary:")
+    click.echo(f"  ✓ Queued: {results['queued_devices']} devices (from {results['total_pairs']} pairs)")
+    click.echo(f"  ⊘ Skipped (not in inventory): {results['skipped_not_in_inventory']} devices")
+    click.echo(f"  ⊘ Skipped (no upgrade path): {results['skipped_no_path']} devices")
+    click.echo(f"  ⊘ Skipped (existing job): {results['skipped_existing_job']} devices")
+    click.echo(f"  ✗ Errors: {results['errors']} devices")
+    click.echo(f"\nTotal: {results['total_devices']} devices from {results['total_pairs']} pairs processed")
+    
+    if not dry_run and results["queued_devices"] > 0:
+        click.echo(f"\nMonitor with:")
+        click.echo(f"  panos-upgrade daemon status")
+        click.echo(f"  panos-upgrade download-status")
+
+
 # ============================================================================
 # Status Commands
 # ============================================================================

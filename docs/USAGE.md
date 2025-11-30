@@ -160,8 +160,11 @@ panos-upgrade upgrade-ha-pairs ha_pairs.csv
 ### Download-Only Mode
 
 ```bash
-# Pre-stage images without installing
+# Pre-stage images for standalone devices
 panos-upgrade download devices.csv
+
+# Pre-stage images for HA pairs (both members)
+panos-upgrade download-ha-pairs ha_pairs.csv
 
 # Single device download-only
 panos-upgrade job submit --device 001234567890 --download-only

@@ -299,8 +299,11 @@ watch -n 5 'panos-upgrade job list --status active'
 ### Download-Only Mode (Pre-stage Images)
 
 ```bash
-# Download software images without installing
+# Download software images for standalone devices
 panos-upgrade download serials.csv
+
+# Download software images for HA pairs (both members)
+panos-upgrade download-ha-pairs ha_pairs.csv
 
 # Check download status
 panos-upgrade download-status
