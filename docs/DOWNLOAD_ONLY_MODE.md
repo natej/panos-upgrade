@@ -96,46 +96,64 @@ Discovering devices from Panorama...
 Inventory saved to: /opt/panos-upgrade/devices/inventory.json
 ```
 
-### Step 2: Queue All Devices for Download
+### Step 2: Create CSV File with Device Serials
+
+Create a CSV file with the devices you want to download images for:
+
+```bash
+cat > download_devices.csv << EOF
+serial,hostname,notes
+001234567890,fw-dc1-01,primary
+001234567891,fw-dc1-02,secondary
+001234567892,fw-dc2-01,standalone
+EOF
+```
+
+The CSV must have a `serial` column. Other columns are optional and ignored.
+
+### Step 3: Queue Devices for Download
 
 ```bash
 # Dry run first to see what would happen
-panos-upgrade download queue-all --dry-run
+panos-upgrade download download_devices.csv --dry-run
 
-# Actually queue all devices
-panos-upgrade download queue-all
+# Actually queue devices
+panos-upgrade download download_devices.csv
 ```
 
 **Output:**
 ```
-Queueing devices for download...
+Processing download_devices.csv for download-only...
+Found 230 serial(s) in CSV
 
-Queued devices for download:
+Queued for download-only:
 
   001234567890 (fw-dc1-01): 10.0.2 → 10.1.0 → 10.5.1 → 11.1.0
   001234567891 (fw-dc1-02): 10.5.1 → 11.1.0
   001234567892 (fw-dc2-01): 11.0.0 → 11.0.3 → 11.1.0
   ... and 212 more
 
-Skipped devices:
+Skipped (not in inventory):
+  001234567999
 
-  001234567999 (fw-old): 9.1.0 (no upgrade path)
-  ... and 14 more
+Skipped (no upgrade path):
+  001234568000 (fw-old): version 9.1.0
 
 Summary:
   ✓ Queued: 215 devices
-  ⊘ Skipped (no upgrade path): 15 devices
+  ⊘ Skipped (not in inventory): 1 devices
+  ⊘ Skipped (no upgrade path): 1 devices
   ⊘ Skipped (existing job): 0 devices
   ✗ Errors: 0 devices
 
-Total: 230 devices processed
+Total: 217 serials processed
 
 Monitor with:
   panos-upgrade daemon status
-  panos-upgrade download status
+  panos-upgrade job list --status active
 ```
 
-### Step 3: Monitor Progress
+### Step 4: Monitor Progress
 
 ```bash
 # Overall daemon status
@@ -151,7 +169,7 @@ panos-upgrade device status 001234567890
 watch -n 5 'panos-upgrade download status'
 ```
 
-### Step 4: Verify Downloads Complete
+### Step 5: Verify Downloads Complete
 
 ```bash
 # Check device status
@@ -170,9 +188,7 @@ panos-upgrade device status 001234567890
 }
 ```
 
-## Individual Device Download
-
-### Submit Single Device
+## Single Device Download
 
 ```bash
 # Download only for one device
@@ -313,21 +329,21 @@ Shows:
 ```bash
 # Refresh device inventory before bulk operations
 panos-upgrade device discover
-panos-upgrade download queue-all
+panos-upgrade download devices.csv
 ```
 
 ### 2. Test with Dry Run
 
 ```bash
 # See what would be queued
-panos-upgrade download queue-all --dry-run
+panos-upgrade download devices.csv --dry-run
 ```
 
 ### 3. Monitor Progress
 
 ```bash
 # Real-time monitoring
-watch -n 10 'panos-upgrade download status'
+watch -n 10 'panos-upgrade download-status'
 ```
 
 ### 4. Check Disk Space
@@ -494,26 +510,34 @@ if status["upgrade_status"] == "download_complete":
 
 ## Complete Example
 
-### Bulk Download All Devices
+### Bulk Download Devices
 
 ```bash
 # Step 1: Discover devices
 panos-upgrade device discover
 
-# Step 2: Start daemon with appropriate workers
+# Step 2: Create CSV with device serials
+cat > download_devices.csv << EOF
+serial
+001234567890
+001234567891
+001234567892
+EOF
+
+# Step 3: Start daemon with appropriate workers
 panos-upgrade daemon start --workers 20
 
-# Step 3: Queue all devices
-panos-upgrade download queue-all
+# Step 4: Queue devices for download
+panos-upgrade download download_devices.csv
 
-# Step 4: Monitor progress
-watch -n 10 'panos-upgrade download status'
+# Step 5: Monitor progress
+watch -n 10 'panos-upgrade download-status'
 
-# Step 5: Wait for completion (check logs)
+# Step 6: Wait for completion (check logs)
 tail -f /opt/panos-upgrade/logs/text/panos-upgrade-*.log
 
-# Step 6: Verify all complete
-panos-upgrade download status
+# Step 7: Verify all complete
+panos-upgrade download-status
 ```
 
 ### Later: Perform Actual Upgrades
@@ -568,7 +592,7 @@ After successful downloads:
 ## Reference
 
 - Device Discovery: `panos-upgrade device discover`
-- Bulk Queue: `panos-upgrade download queue-all`
+- Bulk Download: `panos-upgrade download CSV_FILE`
 - Single Device: `panos-upgrade job submit --device SERIAL --download-only`
-- Monitor: `panos-upgrade download status`
+- Monitor: `panos-upgrade download-status`
 - Logs: `/opt/panos-upgrade/logs/`

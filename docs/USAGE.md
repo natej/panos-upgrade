@@ -81,6 +81,23 @@ panos-upgrade daemon stop
 
 ## Submitting Upgrade Jobs
 
+### Bulk Upgrade from CSV
+
+```bash
+# Create CSV with device serials
+cat > devices.csv << EOF
+serial,hostname
+001234567890,fw-dc1-01
+001234567891,fw-dc1-02
+EOF
+
+# Queue all devices for upgrade
+panos-upgrade upgrade devices.csv
+
+# Dry run first
+panos-upgrade upgrade devices.csv --dry-run
+```
+
 ### Standalone Firewall
 
 ```bash
@@ -94,8 +111,32 @@ panos-upgrade job submit --device 001234567890 --dry-run
 ### HA Pair
 
 ```bash
-# Submit upgrade job for HA pair
-panos-upgrade job submit --ha-pair datacenter-1
+# Submit upgrade job for HA pair (specify both serials)
+panos-upgrade job submit --ha-pair 001234567890 001234567891
+```
+
+### Bulk HA Pairs from CSV
+
+```bash
+# Create CSV with primary and secondary serials
+cat > ha_pairs.csv << EOF
+primary_serial,secondary_serial
+001234567890,001234567891
+001234567892,001234567893
+EOF
+
+# Queue all HA pairs
+panos-upgrade upgrade-ha-pairs ha_pairs.csv
+```
+
+### Download-Only Mode
+
+```bash
+# Pre-stage images without installing
+panos-upgrade download devices.csv
+
+# Single device download-only
+panos-upgrade job submit --device 001234567890 --download-only
 ```
 
 ## Monitoring Jobs

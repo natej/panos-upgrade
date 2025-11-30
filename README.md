@@ -182,20 +182,47 @@ Edit `{work_dir}/config/upgrade_paths.json`:
 panos-upgrade daemon start --workers 5
 ```
 
-### Submit an Upgrade Job
+### Submit Upgrade Jobs
 
-**Standalone Firewall:**
+**Bulk Upgrade from CSV:**
+```bash
+# Create a CSV file with serial numbers
+cat > serials.csv << EOF
+serial,hostname,notes
+001234567890,fw-dc1-01,primary
+001234567891,fw-dc1-02,secondary
+EOF
+
+# Queue all devices for upgrade
+panos-upgrade upgrade serials.csv
+```
+
+**Single Device:**
 ```bash
 panos-upgrade job submit --device 001234567890
 ```
 
-**HA Pair:**
+**HA Pair (specify both serials):**
 ```bash
-panos-upgrade job submit --ha-pair datacenter-1
+panos-upgrade job submit --ha-pair 001234567890 001234567891
+```
+
+**Bulk HA Pairs from CSV:**
+```bash
+# Create a CSV with primary and secondary serials
+cat > ha_pairs.csv << EOF
+primary_serial,secondary_serial,pair_name
+001234567890,001234567891,dc1-pair
+001234567892,001234567893,dc2-pair
+EOF
+
+# Queue all HA pairs
+panos-upgrade upgrade-ha-pairs ha_pairs.csv
 ```
 
 **Dry Run (Test Mode):**
 ```bash
+panos-upgrade upgrade serials.csv --dry-run
 panos-upgrade job submit --device 001234567890 --dry-run
 ```
 
@@ -226,13 +253,27 @@ panos-upgrade job cancel job-001
 ### Upgrade Multiple Devices
 
 ```bash
-# Submit jobs for multiple devices
-for serial in 001234567890 001234567891 001234567892; do
-  panos-upgrade job submit --device $serial
-done
+# Create CSV with device serials
+echo "serial" > devices.csv
+echo "001234567890" >> devices.csv
+echo "001234567891" >> devices.csv
+echo "001234567892" >> devices.csv
+
+# Queue all devices for upgrade
+panos-upgrade upgrade devices.csv
 
 # Monitor progress
 watch -n 5 'panos-upgrade job list --status active'
+```
+
+### Download-Only Mode (Pre-stage Images)
+
+```bash
+# Download software images without installing
+panos-upgrade download serials.csv
+
+# Check download status
+panos-upgrade download-status
 ```
 
 ### Validate Before Upgrading
