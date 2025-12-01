@@ -1,8 +1,11 @@
 """Device inventory management."""
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Tuple
 
 from panos_upgrade.logging_config import get_logger
 from panos_upgrade.utils.file_ops import atomic_write_json, safe_read_json
@@ -67,26 +70,104 @@ class DeviceInventory:
         """Reload inventory from disk."""
         self._load_inventory()
     
+    def _query_ha_state_with_retry(
+        self,
+        device: Dict[str, Any],
+        retry_attempts: int = 3
+    ) -> Tuple[Dict[str, Any], str, str, str]:
+        """
+        Query HA state for a single device with retry logic.
+        
+        Args:
+            device: Device info from Panorama
+            retry_attempts: Number of retry attempts
+            
+        Returns:
+            Tuple of (device_info, device_type, peer_serial, ha_state)
+        """
+        from panos_upgrade.direct_firewall_client import DirectFirewallClient
+        
+        serial = device.get("serial", "")
+        hostname = device.get("hostname", "")
+        mgmt_ip = device.get("ip_address", "")
+        
+        device_type = DEVICE_TYPE_UNKNOWN
+        peer_serial = ""
+        ha_state = HA_STATE_UNKNOWN
+        
+        if mgmt_ip and self.firewall_username and self.firewall_password:
+            last_error = None
+            for attempt in range(1, retry_attempts + 1):
+                try:
+                    firewall_client = DirectFirewallClient(
+                        mgmt_ip=mgmt_ip,
+                        username=self.firewall_username,
+                        password=self.firewall_password
+                    )
+                    ha_info = firewall_client.get_ha_state()
+                    
+                    # Determine device type and HA state
+                    ha_enabled = ha_info.get('enabled', 'no')
+                    local_state = ha_info.get('local_state', 'standalone').lower()
+                    peer = ha_info.get('peer_serial', '')
+                    
+                    if ha_enabled == 'yes' and peer:
+                        device_type = DEVICE_TYPE_HA_PAIR
+                        peer_serial = peer
+                        # Normalize HA state
+                        if 'active' in local_state:
+                            ha_state = HA_STATE_ACTIVE
+                        elif 'passive' in local_state:
+                            ha_state = HA_STATE_PASSIVE
+                        else:
+                            ha_state = local_state
+                    else:
+                        device_type = DEVICE_TYPE_STANDALONE
+                        ha_state = HA_STATE_STANDALONE
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except Exception as e:
+                    last_error = e
+                    if attempt < retry_attempts:
+                        # Wait before retry with exponential backoff
+                        wait_time = 2 ** (attempt - 1)  # 1s, 2s, 4s...
+                        self.logger.debug(
+                            f"Retry {attempt}/{retry_attempts} for {serial} ({mgmt_ip}) "
+                            f"after {wait_time}s: {e}"
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        self.logger.warning(
+                            f"Failed to query HA state for {serial} ({mgmt_ip}) "
+                            f"after {retry_attempts} attempts: {last_error}"
+                        )
+        
+        return (device, device_type, peer_serial, ha_state)
+    
     def discover_devices(
         self, 
+        max_workers: int = 5,
+        retry_attempts: int = 3,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> Dict[str, int]:
         """
-        Discover devices from Panorama and query HA state for each.
+        Discover devices from Panorama and query HA state for each in parallel.
         
         Args:
+            max_workers: Number of parallel workers for HA state queries
+            retry_attempts: Number of retry attempts per device
             progress_callback: Optional callback for progress updates.
                               Called with (current, total, message)
         
         Returns:
             Dictionary with discovery statistics
         """
-        from panos_upgrade.direct_firewall_client import DirectFirewallClient
-        
-        self.logger.info("Discovering devices from Panorama...")
+        self.logger.info(f"Discovering devices from Panorama (workers: {max_workers})...")
         
         try:
-            # Query Panorama for connected devices
+            # Query Panorama for connected devices (single call)
             devices = self.panorama.get_connected_devices()
             total_devices = len(devices)
             
@@ -100,73 +181,83 @@ class DeviceInventory:
                 "ha_query_failures": 0
             }
             
-            for idx, device in enumerate(devices, 1):
+            if total_devices == 0:
+                self.logger.info("No devices found from Panorama")
+                return stats
+            
+            # Track progress with thread-safe counter
+            completed_count = 0
+            progress_lock = threading.Lock()
+            
+            def update_progress():
+                nonlocal completed_count
+                with progress_lock:
+                    completed_count += 1
+                    if progress_callback:
+                        progress_callback(
+                            completed_count, 
+                            total_devices, 
+                            f"Discovered {completed_count}/{total_devices} devices..."
+                        )
+            
+            # Track which devices are new vs updated
+            for device in devices:
+                serial = device.get("serial", "")
+                if serial:
+                    if serial in self._inventory:
+                        stats["updated"] += 1
+                    else:
+                        stats["new"] += 1
+            
+            # Query HA state in parallel
+            results = []
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_device = {
+                    executor.submit(
+                        self._query_ha_state_with_retry, 
+                        device,
+                        retry_attempts
+                    ): device
+                    for device in devices
+                    if device.get("serial")  # Skip devices without serial
+                }
+                
+                # Process results as they complete
+                for future in as_completed(future_to_device):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        update_progress()
+                    except Exception as e:
+                        device = future_to_device[future]
+                        self.logger.error(
+                            f"Unexpected error querying {device.get('serial')}: {e}"
+                        )
+                        # Still count as processed
+                        update_progress()
+            
+            # Process results and update inventory
+            for device, device_type, peer_serial, ha_state in results:
                 serial = device.get("serial", "")
                 if not serial:
                     continue
                 
-                hostname = device.get("hostname", "")
-                mgmt_ip = device.get("ip_address", "")
-                
-                # Report progress
-                if progress_callback:
-                    progress_callback(idx, total_devices, f"Querying {hostname or serial}...")
-                
-                if serial in self._inventory:
-                    stats["updated"] += 1
+                # Update stats based on device type
+                if device_type == DEVICE_TYPE_STANDALONE:
+                    stats["standalone"] += 1
+                elif device_type == DEVICE_TYPE_HA_PAIR:
+                    stats["ha_pair"] += 1
                 else:
-                    stats["new"] += 1
-                
-                # Query HA state directly from firewall
-                device_type = DEVICE_TYPE_UNKNOWN
-                peer_serial = ""
-                ha_state = HA_STATE_UNKNOWN
-                
-                if mgmt_ip and self.firewall_username and self.firewall_password:
-                    try:
-                        firewall_client = DirectFirewallClient(
-                            mgmt_ip=mgmt_ip,
-                            username=self.firewall_username,
-                            password=self.firewall_password
-                        )
-                        ha_info = firewall_client.get_ha_state()
-                        
-                        # Determine device type and HA state
-                        ha_enabled = ha_info.get('enabled', 'no')
-                        local_state = ha_info.get('local_state', 'standalone').lower()
-                        peer = ha_info.get('peer_serial', '')
-                        
-                        if ha_enabled == 'yes' and peer:
-                            device_type = DEVICE_TYPE_HA_PAIR
-                            peer_serial = peer
-                            # Normalize HA state
-                            if 'active' in local_state:
-                                ha_state = HA_STATE_ACTIVE
-                            elif 'passive' in local_state:
-                                ha_state = HA_STATE_PASSIVE
-                            else:
-                                ha_state = local_state
-                            stats["ha_pair"] += 1
-                        else:
-                            device_type = DEVICE_TYPE_STANDALONE
-                            ha_state = HA_STATE_STANDALONE
-                            stats["standalone"] += 1
-                            
-                    except Exception as e:
-                        self.logger.warning(
-                            f"Failed to query HA state for {serial} ({mgmt_ip}): {e}"
-                        )
-                        stats["ha_query_failures"] += 1
-                        stats["unknown"] += 1
-                else:
-                    # No credentials or mgmt_ip - can't query HA state
                     stats["unknown"] += 1
+                    if self.firewall_username and self.firewall_password:
+                        stats["ha_query_failures"] += 1
                 
                 # Store device info
                 self._inventory[serial] = {
                     "serial": serial,
-                    "hostname": hostname,
-                    "mgmt_ip": mgmt_ip,
+                    "hostname": device.get("hostname", ""),
+                    "mgmt_ip": device.get("ip_address", ""),
                     "current_version": device.get("sw_version", ""),
                     "model": device.get("model", ""),
                     "device_type": device_type,

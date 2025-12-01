@@ -51,9 +51,15 @@ Before running any upgrades, discover devices from Panorama:
 
 ```bash
 panos-upgrade device discover
+panos-upgrade device discover --workers 20  # Use 20 parallel workers
 ```
 
-This queries Panorama for connected devices, connects to each firewall to determine HA state, and saves the information to `inventory.json`. This step is **required** before any upgrade or download operations.
+This queries Panorama for connected devices, connects to each firewall in parallel to determine HA state, and saves the information to `inventory.json`. This step is **required** before any upgrade or download operations.
+
+**Options:**
+- `--workers N` - Number of parallel workers (default: `workers.max` from config)
+
+Discovery uses retry logic with exponential backoff for failed connections. Configure retry attempts via `discovery.retry_attempts` (default: 3).
 
 Discovery captures for each device:
 - Serial number, hostname, management IP, software version, model

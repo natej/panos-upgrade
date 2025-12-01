@@ -62,6 +62,9 @@ class Config:
                 "max": constants.DEFAULT_WORKERS,
                 "queue_size": 1000
             },
+            "discovery": {
+                "retry_attempts": constants.DEFAULT_DISCOVERY_RETRY_ATTEMPTS
+            },
             "validation": {
                 "tcp_session_margin": constants.DEFAULT_TCP_SESSION_MARGIN,
                 "route_margin": constants.DEFAULT_ROUTE_MARGIN,
@@ -225,6 +228,11 @@ class Config:
     def max_reboot_poll_interval(self) -> int:
         """Get maximum poll interval when waiting for device reboot in seconds."""
         return self.get("firewall.max_reboot_poll_interval", constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL)
+    
+    @property
+    def discovery_retry_attempts(self) -> int:
+        """Get number of retry attempts for device discovery HA queries."""
+        return self.get("discovery.retry_attempts", constants.DEFAULT_DISCOVERY_RETRY_ATTEMPTS)
 
 
 # Global config instance

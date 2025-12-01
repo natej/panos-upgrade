@@ -19,6 +19,9 @@
     "max": 5,
     "queue_size": 1000
   },
+  "discovery": {
+    "retry_attempts": 3
+  },
   "validation": {
     "tcp_session_margin": 5.0,
     "route_margin": 0.0,

@@ -475,13 +475,23 @@ def metrics(ctx, serial):
 
 
 @device.command()
+@click.option('--workers', '-w', type=int, default=None,
+              help='Number of parallel workers (default: workers.max from config)')
 @click.pass_context
-def discover(ctx):
+def discover(ctx, workers):
     """Discover devices from Panorama and update inventory.
     
     This command queries Panorama for connected devices and then connects
     directly to each firewall to determine its HA state (standalone, active,
     or passive).
+    
+    Uses parallel connections to speed up discovery. The number of workers
+    can be configured via --workers or the workers.max config setting.
+    
+    Example usage:
+    
+        panos-upgrade device discover
+        panos-upgrade device discover --workers 20
     """
     from panos_upgrade.device_inventory import DeviceInventory
     from panos_upgrade.panorama_client import PanoramaClient
@@ -490,7 +500,11 @@ def discover(ctx):
     config = ctx.obj['config']
     logger = ctx.obj['logger']
     
-    click.echo("Discovering devices from Panorama...")
+    # Use provided workers or fall back to config
+    max_workers = workers if workers is not None else config.max_workers
+    retry_attempts = config.discovery_retry_attempts
+    
+    click.echo(f"Discovering devices from Panorama (workers: {max_workers})...")
     
     try:
         # Create clients
@@ -505,12 +519,16 @@ def discover(ctx):
         
         # Progress callback to show status
         def progress_callback(current: int, total: int, message: str):
-            click.echo(f"\r  Querying device {current}/{total}: {message}", nl=False)
+            click.echo(f"\r  {message}", nl=False)
             if current == total:
                 click.echo()  # Newline after last device
         
-        # Discover devices
-        stats = inventory.discover_devices(progress_callback=progress_callback)
+        # Discover devices with parallel workers
+        stats = inventory.discover_devices(
+            max_workers=max_workers,
+            retry_attempts=retry_attempts,
+            progress_callback=progress_callback
+        )
         
         click.echo(f"\n✓ Discovery complete:")
         click.echo(f"  Total devices: {stats['total']}")

@@ -157,9 +157,13 @@ Before running any upgrades, you must discover devices from Panorama:
 
 ```bash
 panos-upgrade device discover
+panos-upgrade device discover --workers 20  # Use 20 parallel workers
 ```
 
-This queries Panorama for connected devices, connects to each firewall to determine HA state, and saves the information to `inventory.json`. This step is required before any upgrade or download operations.
+This queries Panorama for connected devices, connects to each firewall in parallel to determine HA state, and saves the information to `inventory.json`. This step is required before any upgrade or download operations.
+
+**Options:**
+- `--workers N` - Number of parallel workers (default: `workers.max` from config)
 
 **Discovery captures:**
 - Serial number, hostname, management IP, software version, model
@@ -424,6 +428,9 @@ Every command logs which source was used at INFO level:
 ### Worker Settings
 - `workers.max` - Maximum worker threads (1-50, default: 5)
 - `workers.queue_size` - Maximum queue size (default: 1000)
+
+### Discovery Settings
+- `discovery.retry_attempts` - Retry attempts for HA state queries (default: 3)
 
 ### Validation Settings
 - `validation.tcp_session_margin` - TCP session change tolerance % (default: 5.0)
