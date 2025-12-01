@@ -168,8 +168,16 @@ class DeviceInventory:
         
         try:
             # Query Panorama for connected devices (single call)
-            devices = self.panorama.get_connected_devices()
+            all_devices = self.panorama.get_connected_devices()
+            
+            # Filter to only devices with valid serial numbers
+            devices = [d for d in all_devices if d.get("serial")]
             total_devices = len(devices)
+            
+            if len(all_devices) != total_devices:
+                self.logger.debug(
+                    f"Filtered {len(all_devices) - total_devices} devices without serial numbers"
+                )
             
             stats = {
                 "total": total_devices,
@@ -203,11 +211,10 @@ class DeviceInventory:
             # Track which devices are new vs updated
             for device in devices:
                 serial = device.get("serial", "")
-                if serial:
-                    if serial in self._inventory:
-                        stats["updated"] += 1
-                    else:
-                        stats["new"] += 1
+                if serial in self._inventory:
+                    stats["updated"] += 1
+                else:
+                    stats["new"] += 1
             
             # Query HA state in parallel
             results = []
@@ -220,7 +227,6 @@ class DeviceInventory:
                         retry_attempts
                     ): device
                     for device in devices
-                    if device.get("serial")  # Skip devices without serial
                 }
                 
                 # Process results as they complete
