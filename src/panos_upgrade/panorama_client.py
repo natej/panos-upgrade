@@ -419,7 +419,9 @@ class PanoramaClient:
             
             devices = []
             if result is not None:
-                for entry in result.findall('.//entry'):
+                # Use specific XPath to only match device entries under <devices>
+                # Avoid matching <entry> elements from other sections (device groups, templates, etc.)
+                for entry in result.findall('.//devices/entry'):
                     device = {
                         "serial": entry.findtext('serial', ''),
                         "hostname": entry.findtext('hostname', ''),
