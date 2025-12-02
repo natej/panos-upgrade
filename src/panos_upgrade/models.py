@@ -121,6 +121,7 @@ class DeviceStatus:
     hostname: str
     ha_role: str
     current_version: str
+    starting_version: str = ""  # Version when upgrade was first initiated (for daemon restart recovery)
     target_version: str = ""
     upgrade_path: List[str] = field(default_factory=list)
     current_path_index: int = 0

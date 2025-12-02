@@ -521,6 +521,52 @@ All operations connect **directly to firewalls** using management IPs from the d
 **Cause**: Multiple configuration sources or stale user config  
 **Solution**: Check log output for "Work directory: ... (from ...)" message. Update `~/.panos-upgrade.config.json` or use `--work-dir` flag to override.
 
+## Daemon Restart Recovery
+
+The daemon is designed to safely recover from crashes or restarts during upgrade operations.
+
+### How It Works
+
+When an upgrade begins, the daemon stores the device's **starting version** in the device status file. This ensures that if the daemon crashes mid-upgrade, upon restart it will:
+
+1. **Use the original upgrade path**: The path is looked up using the `starting_version`, not the device's current version
+2. **Resume from the correct position**: The daemon detects where the device is in the upgrade path and continues from there
+3. **Avoid path confusion**: Even if the device has already upgraded to an intermediate version, the original intended path is followed
+
+### Example Scenario
+
+Given `upgrade_paths.json`:
+```json
+{
+  "10.1.0": ["10.5.1", "11.1.0"],
+  "10.5.1": ["11.1.0"]
+}
+```
+
+**Without recovery (bug):**
+1. Device starts at `10.1.0`, upgrade path is `10.1.0 → 10.5.1 → 11.1.0`
+2. Device upgrades to `10.5.1`, daemon crashes
+3. Daemon restarts, queries device, sees `10.5.1`
+4. Looks up path for `10.5.1` → gets `["11.1.0"]` (different path!)
+
+**With recovery (correct):**
+1. Device starts at `10.1.0`, `starting_version = "10.1.0"` saved
+2. Device upgrades to `10.5.1`, daemon crashes
+3. Daemon restarts, loads existing status with `starting_version = "10.1.0"`
+4. Looks up path for `10.1.0` → gets `["10.5.1", "11.1.0"]` (original path)
+5. Sees device is at `10.5.1` (position 1 in path), continues to `11.1.0`
+
+### Device Status File
+
+The device status is stored in `{work_dir}/status/devices/{serial}.json` and includes:
+- `starting_version`: The version when the upgrade was first initiated
+- `current_version`: The device's current live version
+- `upgrade_path`: The full upgrade path being followed
+- `current_path_index`: Current position in the upgrade path
+- `upgrade_status`: Current status (pending, downloading, installing, etc.)
+
+This file persists across daemon restarts and enables safe recovery.
+
 ## Development
 
 ### Project Structure

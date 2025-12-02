@@ -143,8 +143,18 @@ class UpgradeManager:
         """
         self.logger.info(f"Starting upgrade for device {serial} (job: {job_id}, dry_run: {dry_run})")
         
-        # Initialize device status
-        device_status = self._init_device_status(serial, job_id)
+        # Check for existing in-progress upgrade (daemon restart recovery)
+        existing_status = self._load_existing_device_status(serial)
+        
+        if existing_status and existing_status.starting_version:
+            # Resume from existing status
+            device_status = existing_status
+            self.logger.info(
+                f"Resuming upgrade for {serial} from starting_version {device_status.starting_version}"
+            )
+        else:
+            # Initialize new device status
+            device_status = self._init_device_status(serial, job_id)
         
         try:
             # Get management IP from inventory
@@ -164,23 +174,51 @@ class UpgradeManager:
             # Get device info via direct connection
             device_info = firewall_client.get_system_info()
             device_status.hostname = device_info.get('hostname', serial)
-            device_status.current_version = device_info.get('sw_version', '')
+            live_version = device_info.get('sw_version', '')
+            device_status.current_version = live_version
             device_status.ha_role = HARole.STANDALONE.value
             
-            # Check for upgrade path
-            upgrade_path = self.get_upgrade_path(device_status.current_version)
+            # Determine which version to use for upgrade path lookup
+            # If resuming, use starting_version; otherwise use current live version
+            if device_status.starting_version:
+                version_for_path_lookup = device_status.starting_version
+                self.logger.info(
+                    f"Using starting_version {version_for_path_lookup} for path lookup "
+                    f"(device is currently at {live_version})"
+                )
+            else:
+                version_for_path_lookup = live_version
+                device_status.starting_version = live_version  # Store for future recovery
+            
+            # Check for upgrade path using the appropriate version
+            upgrade_path = self.get_upgrade_path(version_for_path_lookup)
             
             if upgrade_path is None:
-                msg = f"No upgrade path found for version {device_status.current_version}"
+                msg = f"No upgrade path found for version {version_for_path_lookup}"
                 self.logger.warning(msg, extra={'serial': serial})
                 device_status.upgrade_status = UpgradeStatus.SKIPPED.value
                 device_status.skip_reason = msg
-                device_status.upgrade_message = f"Skipped: No upgrade path for version {device_status.current_version}"
+                device_status.upgrade_message = f"Skipped: No upgrade path for version {version_for_path_lookup}"
                 self._save_device_status(device_status)
                 return False, msg
             
             device_status.upgrade_path = upgrade_path
             device_status.target_version = upgrade_path[-1] if upgrade_path else ""
+            
+            # Calculate current_path_index based on where we are in the path
+            # If device is already at a version in the path, skip to that point
+            if live_version in upgrade_path:
+                device_status.current_path_index = upgrade_path.index(live_version) + 1
+                self.logger.info(
+                    f"Device {serial} is at {live_version}, resuming from path index {device_status.current_path_index}"
+                )
+            elif live_version == device_status.target_version:
+                # Already at target version
+                device_status.upgrade_status = UpgradeStatus.COMPLETE.value
+                device_status.upgrade_message = f"Device already at target version {live_version}"
+                self._save_device_status(device_status)
+                return True, device_status.upgrade_message
+            
             self._save_device_status(device_status)
             
             # Execute upgrade through path (pass mgmt_ip for direct connections)
@@ -607,6 +645,75 @@ class UpgradeManager:
             upgrade_status=UpgradeStatus.PENDING.value
         )
     
+    def _load_existing_device_status(self, serial: str) -> Optional[DeviceStatus]:
+        """
+        Load existing device status from file if it exists and is in-progress.
+        
+        Args:
+            serial: Device serial number
+            
+        Returns:
+            DeviceStatus if an in-progress status exists, None otherwise
+        """
+        status_file = self.config.get_path(constants.DIR_STATUS_DEVICES) / f"{serial}.json"
+        
+        if not status_file.exists():
+            return None
+        
+        try:
+            data = safe_read_json(status_file)
+            if not data:
+                return None
+            
+            # Check if this is an in-progress upgrade that we should resume
+            status = data.get("upgrade_status", "")
+            in_progress_statuses = [
+                UpgradeStatus.PENDING.value,
+                UpgradeStatus.VALIDATING.value,
+                UpgradeStatus.DOWNLOADING.value,
+                UpgradeStatus.INSTALLING.value,
+                UpgradeStatus.REBOOTING.value
+            ]
+            
+            if status not in in_progress_statuses:
+                return None
+            
+            # Check if we have a starting_version to resume from
+            starting_version = data.get("starting_version", "")
+            if not starting_version:
+                return None
+            
+            self.logger.info(
+                f"Found existing in-progress upgrade for {serial} "
+                f"(starting_version: {starting_version}, status: {status})"
+            )
+            
+            # Reconstruct DeviceStatus from saved data
+            device_status = DeviceStatus(
+                serial=data.get("serial", serial),
+                hostname=data.get("hostname", serial),
+                ha_role=data.get("ha_role", HARole.STANDALONE.value),
+                current_version=data.get("current_version", ""),
+                starting_version=starting_version,
+                target_version=data.get("target_version", ""),
+                upgrade_path=data.get("upgrade_path", []),
+                current_path_index=data.get("current_path_index", 0),
+                upgrade_status=status,
+                progress=data.get("progress", 0),
+                current_phase=data.get("current_phase", ""),
+                upgrade_message=data.get("upgrade_message", ""),
+                downloaded_versions=data.get("downloaded_versions", []),
+                skipped_versions=data.get("skipped_versions", []),
+                ready_for_install=data.get("ready_for_install", False),
+                skip_reason=data.get("skip_reason", "")
+            )
+            
+            return device_status
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load existing device status for {serial}: {e}")
+            return None
+    
     def _save_device_status(self, device_status: DeviceStatus):
         """Save device status to file."""
         status_file = self.config.get_path(constants.DIR_STATUS_DEVICES) / f"{device_status.serial}.json"
@@ -654,8 +761,18 @@ class UpgradeManager:
             f"Starting download-only for device {serial} (job: {job_id}, dry_run: {dry_run})"
         )
         
-        # Initialize device status
-        device_status = self._init_device_status(serial, job_id)
+        # Check for existing in-progress download (daemon restart recovery)
+        existing_status = self._load_existing_device_status(serial)
+        
+        if existing_status and existing_status.starting_version:
+            # Resume from existing status
+            device_status = existing_status
+            self.logger.info(
+                f"Resuming download for {serial} from starting_version {device_status.starting_version}"
+            )
+        else:
+            # Initialize new device status
+            device_status = self._init_device_status(serial, job_id)
         
         try:
             # Reload inventory to get latest data
@@ -673,7 +790,7 @@ class UpgradeManager:
                 return False, msg
             
             device_status.hostname = device_info.get("hostname", serial)
-            device_status.current_version = device_info.get("current_version", "")
+            inventory_version = device_info.get("current_version", "")
             mgmt_ip = device_info.get("mgmt_ip", "")
             
             if not mgmt_ip:
@@ -685,15 +802,27 @@ class UpgradeManager:
                 self._save_device_status(device_status)
                 return False, msg
             
-            # Check for upgrade path
-            upgrade_path = self.get_upgrade_path(device_status.current_version)
+            # Determine which version to use for upgrade path lookup
+            # If resuming, use starting_version; otherwise use inventory version
+            if device_status.starting_version:
+                version_for_path_lookup = device_status.starting_version
+                self.logger.info(
+                    f"Using starting_version {version_for_path_lookup} for path lookup"
+                )
+            else:
+                version_for_path_lookup = inventory_version
+                device_status.starting_version = inventory_version  # Store for future recovery
+                device_status.current_version = inventory_version
+            
+            # Check for upgrade path using the appropriate version
+            upgrade_path = self.get_upgrade_path(version_for_path_lookup)
             
             if upgrade_path is None:
-                msg = f"No upgrade path found for version {device_status.current_version}"
+                msg = f"No upgrade path found for version {version_for_path_lookup}"
                 self.logger.warning(msg, extra={'serial': serial})
                 device_status.upgrade_status = UpgradeStatus.SKIPPED.value
                 device_status.skip_reason = msg
-                device_status.upgrade_message = f"Skipped: No upgrade path for version {device_status.current_version}"
+                device_status.upgrade_message = f"Skipped: No upgrade path for version {version_for_path_lookup}"
                 self._save_device_status(device_status)
                 return False, msg
             

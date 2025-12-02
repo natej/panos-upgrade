@@ -315,6 +315,46 @@ All operations connect **directly to firewalls** using management IPs from the d
    - Compare with pre-flight
    - Log differences
 
+## Daemon Restart Recovery
+
+The daemon safely recovers from crashes or restarts during upgrade operations by tracking the **starting version** of each device.
+
+### Recovery Behavior
+
+When an upgrade begins:
+1. The device's current version is saved as `starting_version` in the status file
+2. The upgrade path is determined using this starting version
+3. If the daemon crashes and restarts, it loads the existing status
+4. The original `starting_version` is used for path lookup (not the device's current version)
+5. The daemon calculates where the device is in the path and resumes
+
+### Why This Matters
+
+Consider a device at version `10.1.0` with upgrade path `["10.5.1", "11.1.0"]`:
+
+- Device upgrades to `10.5.1` successfully
+- Daemon crashes before continuing to `11.1.0`
+- Without recovery: Daemon would query device, see `10.5.1`, and look up a potentially different path
+- With recovery: Daemon uses stored `starting_version = "10.1.0"` to get the original path and continues correctly
+
+### Status Files
+
+Device status is persisted to `{work_dir}/status/devices/{serial}.json` and includes:
+
+```json
+{
+  "serial": "001234567890",
+  "starting_version": "10.1.0",
+  "current_version": "10.5.1",
+  "upgrade_path": ["10.5.1", "11.1.0"],
+  "current_path_index": 1,
+  "target_version": "11.1.0",
+  "upgrade_status": "installing"
+}
+```
+
+This enables the daemon to resume upgrades exactly where they left off.
+
 ## Logging
 
 Logs are stored in two formats:
