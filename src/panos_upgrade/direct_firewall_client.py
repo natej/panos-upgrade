@@ -73,6 +73,11 @@ class DirectFirewallClient:
             self._rate_limited_call(xapi.op, cmd=cmd)
             return xapi.element_result
         except PanXapiError as e:
+            # Check for session timeout - clear cached connection to force re-auth on retry
+            error_str = str(e).lower()
+            if 'session' in error_str and ('timed out' in error_str or 'timeout' in error_str or 'expired' in error_str):
+                self.logger.warning(f"Session expired on {self.mgmt_ip}, will reconnect on next attempt")
+                self._xapi = None
             self.logger.error(f"API command failed on {self.mgmt_ip}: {e}")
             raise
     
