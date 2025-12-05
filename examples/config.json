@@ -13,6 +13,8 @@
     "timeout": 300,
     "software_check_timeout": 90,
     "software_info_timeout": 120,
+    "download_timeout": 3600,
+    "upgrade_timeout": 3600,
     "max_reboot_poll_interval": 300
   },
   "workers": {

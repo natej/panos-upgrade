@@ -56,6 +56,8 @@ class Config:
                 "timeout": constants.DEFAULT_TIMEOUT,
                 "software_check_timeout": constants.DEFAULT_SOFTWARE_CHECK_TIMEOUT,
                 "software_info_timeout": constants.DEFAULT_SOFTWARE_INFO_TIMEOUT,
+                "download_timeout": constants.DEFAULT_DOWNLOAD_TIMEOUT,
+                "upgrade_timeout": constants.DEFAULT_UPGRADE_TIMEOUT,
                 "max_reboot_poll_interval": constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL
             },
             "workers": {
@@ -223,6 +225,16 @@ class Config:
     def software_info_timeout(self) -> int:
         """Get timeout for software info command in seconds."""
         return self.get("firewall.software_info_timeout", constants.DEFAULT_SOFTWARE_INFO_TIMEOUT)
+    
+    @property
+    def download_timeout(self) -> int:
+        """Get timeout for download jobs in seconds."""
+        return self.get("firewall.download_timeout", constants.DEFAULT_DOWNLOAD_TIMEOUT)
+    
+    @property
+    def upgrade_timeout(self) -> int:
+        """Get timeout for upgrade/install jobs in seconds."""
+        return self.get("firewall.upgrade_timeout", constants.DEFAULT_UPGRADE_TIMEOUT)
     
     @property
     def max_reboot_poll_interval(self) -> int:

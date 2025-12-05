@@ -428,6 +428,8 @@ Every command logs which source was used at INFO level:
 - `firewall.timeout` - API timeout in seconds (default: 300)
 - `firewall.software_check_timeout` - Timeout for software check command (default: 90)
 - `firewall.software_info_timeout` - Timeout for software info command (default: 120)
+- `firewall.download_timeout` - Timeout for download jobs in seconds (default: 3600)
+- `firewall.upgrade_timeout` - Timeout for upgrade/install jobs in seconds (default: 3600)
 - `firewall.max_reboot_poll_interval` - Max interval between reboot status checks (default: 300)
 
 ### Worker Settings
