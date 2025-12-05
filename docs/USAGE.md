@@ -184,6 +184,48 @@ panos-upgrade download-ha-pairs ha_pairs.csv
 panos-upgrade job submit --device 001234567890 --download-only
 ```
 
+### Verify Downloads
+
+Verify if required software images have been downloaded across all devices in inventory:
+
+```bash
+# Verify all devices, output to auto-generated filename
+panos-upgrade verify-download
+
+# Specify output file
+panos-upgrade verify-download --output my_report.csv
+
+# Use more workers for faster verification
+panos-upgrade verify-download --workers 10
+```
+
+**Output CSV columns:**
+| Column | Description |
+|--------|-------------|
+| `hostname` | Device hostname |
+| `serial` | Device serial number |
+| `model` | Device model |
+| `mgmt_ip` | Management IP address |
+| `current_version` | Current PAN-OS version |
+| `verify_download` | Download status per version (e.g., `10.5.1:yes, 11.1.0:no`) |
+| `verify_download_status` | Overall status |
+
+**`verify_download_status` values:**
+| Value | Meaning |
+|-------|---------|
+| `verification_complete` | Connected and verified downloads |
+| `no_path` | No upgrade path defined for device's current version |
+| `connection_failed` | Could not connect to firewall |
+| `error` | Other error during verification |
+
+**Example output:**
+```csv
+hostname,serial,model,mgmt_ip,current_version,verify_download,verify_download_status
+fw-dc1-01,001234567890,PA-450,10.1.1.100,10.1.0,"10.5.1:yes, 11.1.0:no",verification_complete
+fw-dc1-02,001234567891,PA-450,10.1.1.101,10.1.0,"10.5.1:yes, 11.1.0:yes",verification_complete
+fw-dc2-01,001234567892,PA-220,10.1.2.100,9.1.0,,no_path
+```
+
 ## Monitoring Jobs
 
 ```bash

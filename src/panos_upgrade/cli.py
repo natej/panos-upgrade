@@ -1526,6 +1526,210 @@ def download_status_cmd(ctx):
     click.echo(f"  Failed: {failed}")
 
 
+@main.command(name='verify-download')
+@click.option('--output', '-o', type=click.Path(), default=None,
+              help='Output CSV file path (default: verify_download_YYYYMMDD_HHMMSS.csv)')
+@click.option('--workers', '-w', type=int, default=5,
+              help='Number of parallel workers (default: 5)')
+@click.pass_context
+def verify_download(ctx, output, workers):
+    """Verify downloaded images on all devices in inventory.
+    
+    Connects directly to each firewall and checks if the required
+    software images (from upgrade_paths.json) have been downloaded.
+    
+    Output CSV columns:
+    - hostname, serial, model, mgmt_ip, current_version
+    - verify_download: Download status per version (e.g., "10.5.1:yes, 11.1.0:no")
+    - verify_download_status: Overall status (verification_complete, no_path, connection_failed, error)
+    
+    Example usage:
+    
+        panos-upgrade verify-download
+        panos-upgrade verify-download --output my_report.csv
+        panos-upgrade verify-download --workers 10
+    """
+    import csv
+    from datetime import datetime
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from panos_upgrade.device_inventory import DeviceInventory
+    from panos_upgrade.panorama_client import PanoramaClient
+    from panos_upgrade.direct_firewall_client import DirectFirewallClient
+    from panos_upgrade.utils.file_ops import safe_read_json
+    
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
+    
+    # Generate default output filename if not specified
+    if output is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output = f"verify_download_{timestamp}.csv"
+    
+    click.echo(f"Verifying downloaded images on devices...")
+    click.echo(f"Output file: {output}")
+    click.echo(f"Workers: {workers}")
+    
+    # Load inventory
+    inventory_file = config.get_path("devices/inventory.json")
+    panorama = PanoramaClient(config)
+    inventory = DeviceInventory(
+        inventory_file,
+        panorama,
+        firewall_username=config.firewall_username,
+        firewall_password=config.firewall_password
+    )
+    
+    devices = inventory.list_devices()
+    if not devices:
+        click.echo("No devices in inventory. Run 'panos-upgrade device discover' first.", err=True)
+        sys.exit(1)
+    
+    # Load upgrade paths
+    upgrade_paths = safe_read_json(config.upgrade_paths_file, default={})
+    if not upgrade_paths:
+        click.echo("No upgrade paths defined. Check upgrade_paths.json.", err=True)
+        sys.exit(1)
+    
+    click.echo(f"Found {len(devices)} device(s) in inventory")
+    click.echo(f"Found {len(upgrade_paths)} upgrade path(s) defined")
+    click.echo()
+    
+    # Verification function for a single device
+    def verify_device(device: dict) -> dict:
+        """Verify downloads for a single device."""
+        serial = device.get("serial", "")
+        hostname = device.get("hostname", serial)
+        model = device.get("model", "")
+        mgmt_ip = device.get("mgmt_ip", "")
+        current_version = device.get("current_version", "")
+        
+        result = {
+            "hostname": hostname,
+            "serial": serial,
+            "model": model,
+            "mgmt_ip": mgmt_ip,
+            "current_version": current_version,
+            "verify_download": "",
+            "verify_download_status": ""
+        }
+        
+        # Check if upgrade path exists for this version
+        if current_version not in upgrade_paths:
+            result["verify_download_status"] = "no_path"
+            return result
+        
+        # Get the upgrade path
+        path_versions = upgrade_paths[current_version]
+        
+        # Check if we can connect to the device
+        if not mgmt_ip:
+            result["verify_download_status"] = "connection_failed"
+            return result
+        
+        try:
+            # Connect to firewall
+            firewall_client = DirectFirewallClient(
+                mgmt_ip=mgmt_ip,
+                username=config.firewall_username,
+                password=config.firewall_password,
+                rate_limiter=None
+            )
+            
+            # Get downloaded versions
+            software_info_timeout = config.software_info_timeout
+            downloaded_versions = firewall_client.get_downloaded_versions(timeout=software_info_timeout)
+            
+            # Check each version in the upgrade path
+            version_statuses = []
+            for version in path_versions:
+                is_downloaded = downloaded_versions.get(version, {}).get("downloaded", False)
+                status_str = "yes" if is_downloaded else "no"
+                version_statuses.append(f"{version}:{status_str}")
+            
+            result["verify_download"] = ", ".join(version_statuses)
+            result["verify_download_status"] = "verification_complete"
+            
+        except Exception as e:
+            logger.debug(f"Failed to verify {serial} ({mgmt_ip}): {e}")
+            result["verify_download_status"] = "connection_failed"
+        
+        return result
+    
+    # Process devices in parallel
+    results = []
+    completed = 0
+    total = len(devices)
+    
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_device = {
+            executor.submit(verify_device, device): device
+            for device in devices
+        }
+        
+        for future in as_completed(future_to_device):
+            device = future_to_device[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                # Handle unexpected errors
+                results.append({
+                    "hostname": device.get("hostname", ""),
+                    "serial": device.get("serial", ""),
+                    "model": device.get("model", ""),
+                    "mgmt_ip": device.get("mgmt_ip", ""),
+                    "current_version": device.get("current_version", ""),
+                    "verify_download": "",
+                    "verify_download_status": "error"
+                })
+                logger.error(f"Error verifying {device.get('serial')}: {e}")
+            
+            completed += 1
+            # Show progress every 10 devices or at the end
+            if completed % 10 == 0 or completed == total:
+                click.echo(f"  Verified {completed}/{total} devices...")
+    
+    # Sort results by hostname for consistent output
+    results.sort(key=lambda x: x.get("hostname", ""))
+    
+    # Write CSV
+    csv_columns = [
+        "hostname", "serial", "model", "mgmt_ip", "current_version",
+        "verify_download", "verify_download_status"
+    ]
+    
+    with open(output, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=csv_columns)
+        writer.writeheader()
+        writer.writerows(results)
+    
+    # Calculate summary stats
+    verification_complete = sum(1 for r in results if r["verify_download_status"] == "verification_complete")
+    no_path = sum(1 for r in results if r["verify_download_status"] == "no_path")
+    connection_failed = sum(1 for r in results if r["verify_download_status"] == "connection_failed")
+    errors = sum(1 for r in results if r["verify_download_status"] == "error")
+    
+    # Count fully downloaded devices (all versions = yes)
+    fully_downloaded = 0
+    for r in results:
+        if r["verify_download_status"] == "verification_complete" and r["verify_download"]:
+            if ":no" not in r["verify_download"]:
+                fully_downloaded += 1
+    
+    click.echo()
+    click.echo(f"✓ Verification complete!")
+    click.echo(f"  Results written to: {output}")
+    click.echo()
+    click.echo(f"Summary:")
+    click.echo(f"  Total devices: {total}")
+    click.echo(f"  Verification complete: {verification_complete}")
+    click.echo(f"    - All images downloaded: {fully_downloaded}")
+    click.echo(f"    - Some images missing: {verification_complete - fully_downloaded}")
+    click.echo(f"  No upgrade path: {no_path}")
+    click.echo(f"  Connection failed: {connection_failed}")
+    click.echo(f"  Errors: {errors}")
+
+
 if __name__ == '__main__':
     main()
 

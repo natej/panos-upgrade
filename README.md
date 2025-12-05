@@ -317,6 +317,11 @@ panos-upgrade download-ha-pairs ha_pairs.csv
 
 # Check download status
 panos-upgrade download-status
+
+# Verify downloads across all devices in inventory
+panos-upgrade verify-download
+panos-upgrade verify-download --output my_report.csv
+panos-upgrade verify-download --workers 10
 ```
 
 ### Validate Before Upgrading
