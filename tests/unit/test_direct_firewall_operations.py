@@ -290,8 +290,8 @@ class TestGetSystemMetrics:
 class TestWaitForInstall:
     """Test wait_for_install() method."""
     
-    def test_returns_true_on_success(self, mock_xapi):
-        """Should return True when install completes successfully."""
+    def test_returns_success_tuple_on_success(self, mock_xapi):
+        """Should return (True, False) when install completes successfully."""
         mock_xapi.add_response(
             "show.jobs.id",
             '''<response status="success">
@@ -314,12 +314,13 @@ class TestWaitForInstall:
             xapi=mock_xapi
         )
         
-        result = client.wait_for_install("55", "11.0.0", stall_timeout=5)
+        success, stalled = client.wait_for_install("55", "11.0.0", stall_timeout=5)
         
-        assert result == True
+        assert success == True
+        assert stalled == False
     
-    def test_returns_false_on_failure(self, mock_xapi):
-        """Should return False when install fails."""
+    def test_returns_failure_tuple_on_failure(self, mock_xapi):
+        """Should return (False, False) when install fails."""
         mock_xapi.add_response(
             "show.jobs.id",
             '''<response status="success">
@@ -342,7 +343,8 @@ class TestWaitForInstall:
             xapi=mock_xapi
         )
         
-        result = client.wait_for_install("55", "11.0.0", stall_timeout=5)
+        success, stalled = client.wait_for_install("55", "11.0.0", stall_timeout=5)
         
-        assert result == False
+        assert success == False
+        assert stalled == False
 

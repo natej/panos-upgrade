@@ -339,7 +339,7 @@ class DirectFirewallClient:
         version: str,
         stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         """
         Wait for download job to complete.
         
@@ -350,7 +350,10 @@ class DirectFirewallClient:
             progress_callback: Optional callback function(progress_percent: int) called on progress updates
             
         Returns:
-            True if download completed successfully
+            Tuple of (success, stalled):
+            - (True, False) if download completed successfully
+            - (False, False) if download failed
+            - (False, True) if download stalled (no progress)
         """
         self.logger.info(f"Waiting for download job {job_id} ({version}) on {self.mgmt_ip}")
         
@@ -389,13 +392,13 @@ class DirectFirewallClient:
                 if job_status == 'FIN':
                     if job_result == 'OK':
                         self.logger.info(f"Download completed for {version} on {self.mgmt_ip}")
-                        return True
+                        return (True, False)
                     else:
                         details = status.get('details', 'Unknown error')
                         self.logger.error(
                             f"Download failed for {version} on {self.mgmt_ip}: {details}"
                         )
-                        return False
+                        return (False, False)
                 
                 # Check for stall timeout (no progress change)
                 stall_duration = time.time() - last_progress_time
@@ -404,7 +407,7 @@ class DirectFirewallClient:
                         f"Download job {job_id} stalled - no progress for {int(stall_duration)} seconds "
                         f"(last progress: {last_progress}%) on {self.mgmt_ip}"
                     )
-                    return False
+                    return (False, True)
                 
                 # Job still running (ACT = active)
                 if job_status in ('ACT', 'PEND'):
@@ -610,7 +613,7 @@ class DirectFirewallClient:
         version: str,
         stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         """
         Wait for installation job to complete.
         
@@ -621,7 +624,10 @@ class DirectFirewallClient:
             progress_callback: Optional callback function(progress_percent: int)
             
         Returns:
-            True if installation completed successfully
+            Tuple of (success, stalled):
+            - (True, False) if installation completed successfully
+            - (False, False) if installation failed
+            - (False, True) if installation stalled (no progress)
         """
         self.logger.info(f"Waiting for install job {job_id} ({version}) on {self.mgmt_ip}")
         
@@ -658,13 +664,13 @@ class DirectFirewallClient:
                 if job_status == 'FIN':
                     if job_result == 'OK':
                         self.logger.info(f"Installation completed for {version} on {self.mgmt_ip}")
-                        return True
+                        return (True, False)
                     else:
                         details = status.get('details', 'Unknown error')
                         self.logger.error(
                             f"Installation failed for {version} on {self.mgmt_ip}: {details}"
                         )
-                        return False
+                        return (False, False)
                 
                 # Check for stall timeout (no progress change)
                 stall_duration = time.time() - last_progress_time
@@ -673,7 +679,7 @@ class DirectFirewallClient:
                         f"Install job {job_id} stalled - no progress for {int(stall_duration)} seconds "
                         f"(last progress: {last_progress}%) on {self.mgmt_ip}"
                     )
-                    return False
+                    return (False, True)
                 
                 if job_status in ('ACT', 'PEND'):
                     time.sleep(poll_interval)

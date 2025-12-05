@@ -501,13 +501,17 @@ class UpgradeManager:
                         device_status.upgrade_message = f"Downloading {target_version}: {progress}%"
                         self._save_device_status(device_status)
                     
-                    success = firewall_client.wait_for_download(
+                    success, stalled = firewall_client.wait_for_download(
                         job_id_download, target_version,
                         stall_timeout=self.config.job_stall_timeout,
                         progress_callback=update_download_progress
                     )
                     if not success:
-                        error = f"Download of {target_version} failed or did not complete"
+                        if stalled:
+                            error = f"Download of {target_version} stalled - job showed no progress"
+                            device_status.upgrade_message = f"Job stalled: Download of {target_version}"
+                        else:
+                            error = f"Download of {target_version} failed"
                         device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
                         self._save_device_status(device_status)
                         return False
@@ -543,13 +547,17 @@ class UpgradeManager:
                     device_status.upgrade_message = f"Installing {target_version}: {progress}%"
                     self._save_device_status(device_status)
                 
-                success = firewall_client.wait_for_install(
+                success, stalled = firewall_client.wait_for_install(
                     job_id_install, target_version,
                     stall_timeout=self.config.job_stall_timeout,
                     progress_callback=update_install_progress
                 )
                 if not success:
-                    error = f"Installation of {target_version} failed or did not complete"
+                    if stalled:
+                        error = f"Installation of {target_version} stalled - job showed no progress"
+                        device_status.upgrade_message = f"Job stalled: Installation of {target_version}"
+                    else:
+                        error = f"Installation of {target_version} failed"
                     device_status.add_error(UpgradePhase.INSTALL.value, error)
                     self._save_device_status(device_status)
                     return False
@@ -985,17 +993,21 @@ class UpgradeManager:
                         device_status.upgrade_message = f"Downloading {version}: {download_progress}%"
                         self._save_device_status(device_status)
                     
-                    success = firewall_client.wait_for_download(
+                    success, stalled = firewall_client.wait_for_download(
                         job_id_download,
                         version,
                         stall_timeout=self.config.job_stall_timeout,
                         progress_callback=update_progress
                     )
                     if not success:
-                        msg = f"Download of {version} failed or did not complete"
+                        if stalled:
+                            msg = f"Download of {version} stalled - job showed no progress"
+                            device_status.upgrade_message = f"Job stalled: Download of {version}"
+                        else:
+                            msg = f"Download of {version} failed"
+                            device_status.upgrade_message = msg
                         device_status.add_error("download", msg)
                         device_status.upgrade_status = UpgradeStatus.FAILED.value
-                        device_status.upgrade_message = msg
                         self._save_device_status(device_status)
                         return False, msg
                     
