@@ -503,7 +503,7 @@ class UpgradeManager:
                     
                     success = firewall_client.wait_for_download(
                         job_id_download, target_version,
-                        timeout=self.config.download_timeout,
+                        stall_timeout=self.config.job_stall_timeout,
                         progress_callback=update_download_progress
                     )
                     if not success:
@@ -545,7 +545,7 @@ class UpgradeManager:
                 
                 success = firewall_client.wait_for_install(
                     job_id_install, target_version,
-                    timeout=self.config.upgrade_timeout,
+                    stall_timeout=self.config.job_stall_timeout,
                     progress_callback=update_install_progress
                 )
                 if not success:
@@ -988,7 +988,7 @@ class UpgradeManager:
                     success = firewall_client.wait_for_download(
                         job_id_download,
                         version,
-                        timeout=self.config.download_timeout,
+                        stall_timeout=self.config.job_stall_timeout,
                         progress_callback=update_progress
                     )
                     if not success:

@@ -314,7 +314,7 @@ class TestWaitForInstall:
             xapi=mock_xapi
         )
         
-        result = client.wait_for_install("55", "11.0.0", timeout=5)
+        result = client.wait_for_install("55", "11.0.0", stall_timeout=5)
         
         assert result == True
     
@@ -342,7 +342,7 @@ class TestWaitForInstall:
             xapi=mock_xapi
         )
         
-        result = client.wait_for_install("55", "11.0.0", timeout=5)
+        result = client.wait_for_install("55", "11.0.0", stall_timeout=5)
         
         assert result == False
 

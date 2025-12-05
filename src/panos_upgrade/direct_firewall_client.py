@@ -337,7 +337,7 @@ class DirectFirewallClient:
         self,
         job_id: str,
         version: str,
-        timeout: int = 1800,
+        stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
     ) -> bool:
         """
@@ -346,7 +346,7 @@ class DirectFirewallClient:
         Args:
             job_id: Job ID returned from download_software()
             version: Software version being downloaded (for logging)
-            timeout: Maximum time to wait in seconds
+            stall_timeout: Timeout when job shows no progress (seconds)
             progress_callback: Optional callback function(progress_percent: int) called on progress updates
             
         Returns:
@@ -354,11 +354,11 @@ class DirectFirewallClient:
         """
         self.logger.info(f"Waiting for download job {job_id} ({version}) on {self.mgmt_ip}")
         
-        start_time = time.time()
         poll_interval = 10  # Poll every 10 seconds
         last_progress = -1
+        last_progress_time = time.time()
         
-        while time.time() - start_time < timeout:
+        while True:
             try:
                 status = self.check_job_status(job_id)
                 job_status = status.get('status', 'UNKNOWN')
@@ -375,12 +375,14 @@ class DirectFirewallClient:
                     f"Job {job_id} status: {job_status}, result: {job_result}, progress: {progress}%"
                 )
                 
-                # Call progress callback if progress changed
-                if progress_callback and progress != last_progress:
-                    try:
-                        progress_callback(progress)
-                    except Exception as e:
-                        self.logger.warning(f"Progress callback error: {e}")
+                # Track progress changes for stall detection
+                if progress != last_progress:
+                    last_progress_time = time.time()
+                    if progress_callback:
+                        try:
+                            progress_callback(progress)
+                        except Exception as e:
+                            self.logger.warning(f"Progress callback error: {e}")
                     last_progress = progress
                 
                 # Job finished
@@ -395,6 +397,15 @@ class DirectFirewallClient:
                         )
                         return False
                 
+                # Check for stall timeout (no progress change)
+                stall_duration = time.time() - last_progress_time
+                if stall_duration > stall_timeout:
+                    self.logger.error(
+                        f"Download job {job_id} stalled - no progress for {int(stall_duration)} seconds "
+                        f"(last progress: {last_progress}%) on {self.mgmt_ip}"
+                    )
+                    return False
+                
                 # Job still running (ACT = active)
                 if job_status in ('ACT', 'PEND'):
                     time.sleep(poll_interval)
@@ -407,11 +418,6 @@ class DirectFirewallClient:
             except Exception as e:
                 self.logger.warning(f"Error checking job status: {e}")
                 time.sleep(poll_interval)
-        
-        self.logger.error(
-            f"Download job {job_id} did not complete within {timeout} seconds on {self.mgmt_ip}"
-        )
-        return False
     
     def get_downloaded_versions(self, timeout: int = 120) -> Dict[str, Dict[str, Any]]:
         """
@@ -602,7 +608,7 @@ class DirectFirewallClient:
         self,
         job_id: str,
         version: str,
-        timeout: int = 1800,
+        stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
     ) -> bool:
         """
@@ -611,7 +617,7 @@ class DirectFirewallClient:
         Args:
             job_id: Job ID returned from install_software()
             version: Software version being installed (for logging)
-            timeout: Maximum time to wait in seconds
+            stall_timeout: Timeout when job shows no progress (seconds)
             progress_callback: Optional callback function(progress_percent: int)
             
         Returns:
@@ -619,11 +625,11 @@ class DirectFirewallClient:
         """
         self.logger.info(f"Waiting for install job {job_id} ({version}) on {self.mgmt_ip}")
         
-        start_time = time.time()
         poll_interval = 10
         last_progress = -1
+        last_progress_time = time.time()
         
-        while time.time() - start_time < timeout:
+        while True:
             try:
                 status = self.check_job_status(job_id)
                 job_status = status.get('status', 'UNKNOWN')
@@ -639,11 +645,14 @@ class DirectFirewallClient:
                     f"Install job {job_id} status: {job_status}, result: {job_result}, progress: {progress}%"
                 )
                 
-                if progress_callback and progress != last_progress:
-                    try:
-                        progress_callback(progress)
-                    except Exception as e:
-                        self.logger.warning(f"Progress callback error: {e}")
+                # Track progress changes for stall detection
+                if progress != last_progress:
+                    last_progress_time = time.time()
+                    if progress_callback:
+                        try:
+                            progress_callback(progress)
+                        except Exception as e:
+                            self.logger.warning(f"Progress callback error: {e}")
                     last_progress = progress
                 
                 if job_status == 'FIN':
@@ -657,6 +666,15 @@ class DirectFirewallClient:
                         )
                         return False
                 
+                # Check for stall timeout (no progress change)
+                stall_duration = time.time() - last_progress_time
+                if stall_duration > stall_timeout:
+                    self.logger.error(
+                        f"Install job {job_id} stalled - no progress for {int(stall_duration)} seconds "
+                        f"(last progress: {last_progress}%) on {self.mgmt_ip}"
+                    )
+                    return False
+                
                 if job_status in ('ACT', 'PEND'):
                     time.sleep(poll_interval)
                     continue
@@ -667,11 +685,6 @@ class DirectFirewallClient:
             except Exception as e:
                 self.logger.warning(f"Error checking install job status: {e}")
                 time.sleep(poll_interval)
-        
-        self.logger.error(
-            f"Install job {job_id} did not complete within {timeout} seconds on {self.mgmt_ip}"
-        )
-        return False
     
     def reboot_device(self) -> bool:
         """
