@@ -969,6 +969,30 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     time.sleep(1)
                 else:
+                    # Check disk space before each download
+                    device_status.upgrade_message = f"Checking disk space before downloading {version}..."
+                    self._save_device_status(device_status)
+                    
+                    disk_space_gb = firewall_client.check_disk_space()
+                    min_disk_gb = self.config.min_disk_gb
+                    
+                    device_status.disk_space = DiskSpaceInfo(
+                        available_gb=disk_space_gb,
+                        required_gb=min_disk_gb,
+                        check_passed=disk_space_gb >= min_disk_gb
+                    )
+                    
+                    if disk_space_gb < min_disk_gb:
+                        msg = f"Insufficient disk space before downloading {version}: {disk_space_gb:.2f} GB available, {min_disk_gb:.2f} GB required"
+                        self.logger.error(msg, extra={'serial': serial})
+                        device_status.upgrade_status = UpgradeStatus.FAILED.value
+                        device_status.upgrade_message = msg
+                        device_status.add_error("download", msg)
+                        self._save_device_status(device_status)
+                        return False, msg
+                    
+                    self.logger.debug(f"Disk space check passed before {version}: {disk_space_gb:.2f} GB available")
+                    
                     # Initiate download - returns job ID
                     job_id_download = firewall_client.download_software(version)
                     if not job_id_download:
