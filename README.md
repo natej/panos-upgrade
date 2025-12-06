@@ -442,7 +442,7 @@ Every command logs which source was used at INFO level:
 - `validation.tcp_session_margin` - TCP session change tolerance % (default: 5.0)
 - `validation.route_margin` - Route count change tolerance (default: 0.0)
 - `validation.arp_margin` - ARP entry change tolerance (default: 0.0)
-- `validation.min_disk_gb` - Minimum required disk space GB (default: 5.0)
+- `validation.min_disk_gb` - Minimum required disk space in GB before each image download (default: 5.0). This is checked before downloading each image in the upgrade path, not a total. Set this to at least the size of the largest image that will be downloaded.
 
 ### Logging Settings
 - `logging.level` - Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -512,8 +512,8 @@ All operations connect **directly to firewalls** using management IPs from the d
 **Solution**: Add version to upgrade paths or update device manually
 
 ### Insufficient Disk Space
-**Cause**: Available disk space below minimum threshold  
-**Solution**: Free up space on firewall or adjust `validation.min_disk_gb`
+**Cause**: Available disk space below minimum threshold before downloading an image  
+**Solution**: Free up space on firewall or adjust `validation.min_disk_gb`. Note: disk space is checked before each image download, so ensure enough space for the largest image in your upgrade path.
 
 ### Validation Failed
 **Cause**: Metrics outside acceptable margins  

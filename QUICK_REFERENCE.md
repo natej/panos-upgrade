@@ -292,7 +292,7 @@ find /var/lib/panos-upgrade/queue/completed -mtime +30 -delete
 - `validation.tcp_session_margin` - TCP % margin (default: 5.0)
 - `validation.route_margin` - Route count margin (default: 0.0)
 - `validation.arp_margin` - ARP count margin (default: 0.0)
-- `validation.min_disk_gb` - Min disk GB (default: 5.0)
+- `validation.min_disk_gb` - Min disk GB before each image download; set to largest image size (default: 5.0)
 
 ### Logging
 - `logging.level` - Log level (default: INFO)

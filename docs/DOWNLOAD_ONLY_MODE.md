@@ -413,7 +413,7 @@ ERROR: Insufficient disk space: 1.50 GB available, 5.00 GB required
 
 **Solution:**
 - Free up space on firewall
-- Adjust `validation.min_disk_gb` setting
+- Adjust `validation.min_disk_gb` setting (this is checked before each image download, not total; set to at least the largest image size)
 
 ## Advanced Usage
 
@@ -489,7 +489,7 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
 |---------|---------|-------------|
 | `firewall.software_check_timeout` | 90 | Timeout (seconds) for `request system software check` |
 | `firewall.software_info_timeout` | 120 | Timeout (seconds) for `request system software info` |
-| `validation.min_disk_gb` | 5.0 | Minimum disk space required |
+| `validation.min_disk_gb` | 5.0 | Minimum disk space (GB) required before each image download. Set to at least the largest image size. |
 
 ## Web Integration
 

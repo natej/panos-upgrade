@@ -97,7 +97,8 @@ panos-upgrade config set workers.max 10
 # Set API rate limit (requests per minute)
 panos-upgrade config set panorama.rate_limit 15
 
-# Set minimum disk space requirement (GB)
+# Set minimum disk space requirement (GB) - checked before each image download
+# Set this to at least the size of the largest image in your upgrade path
 panos-upgrade config set validation.min_disk_gb 5.0
 
 # Set TCP session validation margin (percentage)
@@ -424,7 +425,7 @@ If a device is skipped, check:
 
 ### Insufficient Disk Space
 
-Increase available disk space on the firewall or adjust the minimum requirement:
+Disk space is checked before downloading each image in the upgrade path. Increase available disk space on the firewall or adjust the minimum requirement. Set the value to at least the size of the largest image that will be downloaded:
 
 ```bash
 panos-upgrade config set validation.min_disk_gb 3.0
