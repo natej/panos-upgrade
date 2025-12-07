@@ -15,6 +15,7 @@
     "software_info_timeout": 120,
     "job_stall_timeout": 1800,
     "max_reboot_poll_interval": 300,
+    "reboot_ready_timeout": 600,
     "download_retry_attempts": 3
   },
   "workers": {

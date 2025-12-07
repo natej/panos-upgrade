@@ -430,6 +430,7 @@ Every command logs which source was used at INFO level:
 - `firewall.software_info_timeout` - Timeout for software info command (default: 120)
 - `firewall.job_stall_timeout` - Timeout when download/install jobs show no progress (default: 1800)
 - `firewall.max_reboot_poll_interval` - Max interval between reboot status checks (default: 300)
+- `firewall.reboot_ready_timeout` - Max time to wait for device to become ready after reboot (default: 600)
 - `firewall.download_retry_attempts` - Number of retry attempts for failed image downloads (default: 3)
 
 ### Worker Settings

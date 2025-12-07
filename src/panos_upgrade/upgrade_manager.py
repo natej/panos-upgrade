@@ -505,7 +505,8 @@ class UpgradeManager:
                 
                 reboot_client = self._create_firewall_client(mgmt_ip)
                 max_poll_interval = self.config.max_reboot_poll_interval
-                ready = reboot_client.check_device_ready(timeout=600, max_poll_interval=max_poll_interval)
+                reboot_timeout = self.config.reboot_ready_timeout
+                ready = reboot_client.check_device_ready(timeout=reboot_timeout, max_poll_interval=max_poll_interval)
                 if not ready:
                     error = "Device did not come back online after reboot"
                     device_status.add_error(UpgradePhase.REBOOT.value, error)
