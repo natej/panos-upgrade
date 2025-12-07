@@ -256,6 +256,10 @@ class UpgradeManager:
         """
         Upgrade an HA pair (passive first, then active).
         
+        This method determines the target version first by checking upgrade paths
+        for both members. If a member is already at the target version, it is
+        skipped (treated as success) and the other member is upgraded.
+        
         Args:
             primary_serial: Primary device serial
             secondary_serial: Secondary device serial
@@ -285,10 +289,47 @@ class UpgradeManager:
                 self.logger.error(msg)
                 return False, msg
             
-            # Determine which is passive via direct connection
+            # Connect to both firewalls and get system info
             primary_client = self._create_firewall_client(primary_mgmt_ip)
             secondary_client = self._create_firewall_client(secondary_mgmt_ip)
             
+            primary_info = primary_client.get_system_info()
+            secondary_info = secondary_client.get_system_info()
+            
+            primary_version = primary_info.get('sw_version', '')
+            secondary_version = secondary_info.get('sw_version', '')
+            
+            self.logger.info(
+                f"HA pair versions - {primary_serial}: {primary_version}, "
+                f"{secondary_serial}: {secondary_version}"
+            )
+            
+            # Determine the target version by checking upgrade paths for both members
+            primary_path = self.get_upgrade_path(primary_version)
+            secondary_path = self.get_upgrade_path(secondary_version)
+            
+            target_version = None
+            if primary_path:
+                target_version = primary_path[-1]
+            elif secondary_path:
+                target_version = secondary_path[-1]
+            else:
+                # Neither has an upgrade path - check if they're at the same version
+                if primary_version == secondary_version:
+                    msg = f"Both HA members already at version {primary_version}, no upgrade path defined"
+                    self.logger.info(msg)
+                    return True, msg
+                else:
+                    msg = (
+                        f"No upgrade path found for either HA member: "
+                        f"{primary_serial} at {primary_version}, {secondary_serial} at {secondary_version}"
+                    )
+                    self.logger.error(msg)
+                    return False, msg
+            
+            self.logger.info(f"HA pair target version: {target_version}")
+            
+            # Determine HA state to know upgrade order
             ha_state_primary = primary_client.get_ha_state()
             ha_state_secondary = secondary_client.get_ha_state()
             
@@ -297,31 +338,41 @@ class UpgradeManager:
             
             # Determine upgrade order (passive first)
             if 'passive' in primary_state.lower():
-                first_serial, second_serial = primary_serial, secondary_serial
+                passive_serial, active_serial = primary_serial, secondary_serial
+                passive_version, active_version = primary_version, secondary_version
             elif 'passive' in secondary_state.lower():
-                first_serial, second_serial = secondary_serial, primary_serial
+                passive_serial, active_serial = secondary_serial, primary_serial
+                passive_version, active_version = secondary_version, primary_version
             else:
                 msg = f"Could not determine passive member for HA pair"
                 self.logger.error(msg)
                 return False, msg
             
-            self.logger.info(f"Upgrading passive member first: {first_serial}")
-            
-            # Upgrade passive member
-            success, msg = self.upgrade_device(first_serial, job_id, dry_run)
-            if not success:
-                return False, f"Failed to upgrade passive member: {msg}"
+            # Upgrade passive member (or skip if already at target)
+            if passive_version == target_version:
+                self.logger.info(
+                    f"Passive member {passive_serial} already at target version {target_version}, skipping"
+                )
+            else:
+                self.logger.info(f"Upgrading passive member first: {passive_serial}")
+                success, msg = self.upgrade_device(passive_serial, job_id, dry_run)
+                if not success:
+                    return False, f"Failed to upgrade passive member: {msg}"
             
             # Check for cancellation
-            if self._is_cancelled(job_id, first_serial):
+            if self._is_cancelled(job_id, passive_serial):
                 return False, "Upgrade cancelled"
             
-            self.logger.info(f"Upgrading active member: {second_serial}")
-            
-            # Upgrade active member
-            success, msg = self.upgrade_device(second_serial, job_id, dry_run)
-            if not success:
-                return False, f"Failed to upgrade active member: {msg}"
+            # Upgrade active member (or skip if already at target)
+            if active_version == target_version:
+                self.logger.info(
+                    f"Active member {active_serial} already at target version {target_version}, skipping"
+                )
+            else:
+                self.logger.info(f"Upgrading active member: {active_serial}")
+                success, msg = self.upgrade_device(active_serial, job_id, dry_run)
+                if not success:
+                    return False, f"Failed to upgrade active member: {msg}"
             
             return True, "HA pair upgrade completed successfully"
             
