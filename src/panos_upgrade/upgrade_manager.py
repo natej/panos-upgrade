@@ -551,7 +551,16 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False
                 
-                self.logger.info(f"Waiting for {serial} to reboot and come back online...")
+                # Wait for device to shut down before polling for readiness
+                initial_delay = self.config.reboot_initial_delay
+                self.logger.info(
+                    f"Reboot initiated for {serial}, waiting {initial_delay} seconds for device to shut down..."
+                )
+                device_status.upgrade_message = f"Reboot initiated, waiting {initial_delay}s for shutdown..."
+                self._save_device_status(device_status)
+                time.sleep(initial_delay)
+                
+                self.logger.info(f"Polling for {serial} to come back online...")
                 device_status.upgrade_message = "Waiting for device to come back online after reboot"
                 self._save_device_status(device_status)
                 

@@ -59,6 +59,7 @@ class Config:
                 "job_stall_timeout": constants.DEFAULT_JOB_STALL_TIMEOUT,
                 "max_reboot_poll_interval": constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL,
                 "reboot_ready_timeout": constants.DEFAULT_REBOOT_READY_TIMEOUT,
+                "reboot_initial_delay": constants.DEFAULT_REBOOT_INITIAL_DELAY,
                 "download_retry_attempts": constants.DEFAULT_DOWNLOAD_RETRY_ATTEMPTS
             },
             "workers": {
@@ -259,6 +260,11 @@ class Config:
     def reboot_ready_timeout(self) -> int:
         """Get maximum time to wait for device to become ready after reboot in seconds."""
         return self.get("firewall.reboot_ready_timeout", constants.DEFAULT_REBOOT_READY_TIMEOUT)
+    
+    @property
+    def reboot_initial_delay(self) -> int:
+        """Get seconds to wait after initiating reboot before polling for readiness."""
+        return self.get("firewall.reboot_initial_delay", constants.DEFAULT_REBOOT_INITIAL_DELAY)
     
     @property
     def discovery_retry_attempts(self) -> int:
