@@ -2,11 +2,47 @@
 
 import time
 import xml.etree.ElementTree as ET
-from typing import Dict, Optional, Any
+from dataclasses import dataclass
+from typing import Dict, Optional, Any, List
 from pan.xapi import PanXapi, PanXapiError
 
 from panos_upgrade.logging_config import get_logger
 from panos_upgrade.config import Config
+
+
+@dataclass
+class JobResult:
+    """Result from a PAN-OS job operation."""
+    success: bool
+    stalled: bool
+    details: str
+    job_id: str
+    result_code: str = ""  # OK, FAIL, PEND, etc.
+    warnings: List[str] = None
+    
+    def __post_init__(self):
+        if self.warnings is None:
+            self.warnings = []
+    
+    @property
+    def error_message(self) -> str:
+        """Get a formatted error message including all details."""
+        if self.success:
+            return ""
+        
+        parts = []
+        if self.stalled:
+            parts.append("Job stalled (no progress)")
+        elif self.result_code:
+            parts.append(f"Result: {self.result_code}")
+        
+        if self.details:
+            parts.append(self.details)
+        
+        if self.warnings:
+            parts.append(f"Warnings: {'; '.join(self.warnings)}")
+        
+        return " - ".join(parts) if parts else "Unknown error"
 
 
 class DirectFirewallClient:
@@ -223,7 +259,8 @@ class DirectFirewallClient:
             - status: Job status (ACT, FIN, etc.)
             - result: Job result (OK, FAIL, etc.)
             - progress: Progress percentage
-            - details: Job description/details
+            - details: Job description/details (may include nested line elements)
+            - warnings: List of warning messages
         """
         try:
             cmd = f"<show><jobs><id>{job_id}</id></jobs></show>"
@@ -233,7 +270,8 @@ class DirectFirewallClient:
                 'status': 'UNKNOWN',
                 'result': '',
                 'progress': '0',
-                'details': ''
+                'details': '',
+                'warnings': []
             }
             
             if result is not None:
@@ -242,7 +280,33 @@ class DirectFirewallClient:
                     status['status'] = job.findtext('status', 'UNKNOWN')
                     status['result'] = job.findtext('result', '')
                     status['progress'] = job.findtext('progress', '0')
-                    status['details'] = job.findtext('details', '') or job.findtext('description', '')
+                    
+                    # Parse details - may be direct text or contain <line> elements
+                    details_elem = job.find('details')
+                    if details_elem is not None:
+                        # Check for nested <line> elements
+                        lines = details_elem.findall('.//line')
+                        if lines:
+                            status['details'] = ' | '.join(
+                                line.text.strip() for line in lines if line.text
+                            )
+                        else:
+                            status['details'] = details_elem.text.strip() if details_elem.text else ''
+                    
+                    # Fallback to description if no details
+                    if not status['details']:
+                        status['details'] = job.findtext('description', '')
+                    
+                    # Parse warnings if present
+                    warnings_elem = job.find('warnings')
+                    if warnings_elem is not None:
+                        warning_lines = warnings_elem.findall('.//line')
+                        if warning_lines:
+                            status['warnings'] = [
+                                line.text.strip() for line in warning_lines if line.text
+                            ]
+                        elif warnings_elem.text:
+                            status['warnings'] = [warnings_elem.text.strip()]
             
             return status
         except Exception as e:
@@ -344,7 +408,7 @@ class DirectFirewallClient:
         version: str,
         stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
-    ) -> tuple[bool, bool]:
+    ) -> JobResult:
         """
         Wait for download job to complete.
         
@@ -355,10 +419,7 @@ class DirectFirewallClient:
             progress_callback: Optional callback function(progress_percent: int) called on progress updates
             
         Returns:
-            Tuple of (success, stalled):
-            - (True, False) if download completed successfully
-            - (False, False) if download failed
-            - (False, True) if download stalled (no progress)
+            JobResult with success status and error details if failed
         """
         self.logger.info(f"Waiting for download job {job_id} ({version}) on {self.mgmt_ip}")
         
@@ -372,6 +433,8 @@ class DirectFirewallClient:
                 job_status = status.get('status', 'UNKNOWN')
                 job_result = status.get('result', '')
                 progress_str = status.get('progress', '0')
+                details = status.get('details', '')
+                warnings = status.get('warnings', [])
                 
                 # Parse progress as int
                 try:
@@ -397,22 +460,45 @@ class DirectFirewallClient:
                 if job_status == 'FIN':
                     if job_result == 'OK':
                         self.logger.info(f"Download completed for {version} on {self.mgmt_ip}")
-                        return (True, False)
-                    else:
-                        details = status.get('details', 'Unknown error')
-                        self.logger.error(
-                            f"Download failed for {version} on {self.mgmt_ip}: {details}"
+                        return JobResult(
+                            success=True,
+                            stalled=False,
+                            details=details,
+                            job_id=job_id,
+                            result_code=job_result,
+                            warnings=warnings
                         )
-                        return (False, False)
+                    else:
+                        self.logger.error(
+                            f"Download failed for {version} on {self.mgmt_ip}: {details or 'Unknown error'}"
+                        )
+                        return JobResult(
+                            success=False,
+                            stalled=False,
+                            details=details or "Unknown error",
+                            job_id=job_id,
+                            result_code=job_result,
+                            warnings=warnings
+                        )
                 
                 # Check for stall timeout (no progress change)
                 stall_duration = time.time() - last_progress_time
                 if stall_duration > stall_timeout:
-                    self.logger.error(
-                        f"Download job {job_id} stalled - no progress for {int(stall_duration)} seconds "
-                        f"(last progress: {last_progress}%) on {self.mgmt_ip}"
+                    stall_msg = (
+                        f"No progress for {int(stall_duration)} seconds "
+                        f"(last progress: {last_progress}%)"
                     )
-                    return (False, True)
+                    self.logger.error(
+                        f"Download job {job_id} stalled - {stall_msg} on {self.mgmt_ip}"
+                    )
+                    return JobResult(
+                        success=False,
+                        stalled=True,
+                        details=stall_msg,
+                        job_id=job_id,
+                        result_code=job_result,
+                        warnings=warnings
+                    )
                 
                 # Job still running (ACT = active)
                 if job_status in ('ACT', 'PEND'):
@@ -618,7 +704,7 @@ class DirectFirewallClient:
         version: str,
         stall_timeout: int = 1800,
         progress_callback: Optional[callable] = None
-    ) -> tuple[bool, bool]:
+    ) -> JobResult:
         """
         Wait for installation job to complete.
         
@@ -629,10 +715,7 @@ class DirectFirewallClient:
             progress_callback: Optional callback function(progress_percent: int)
             
         Returns:
-            Tuple of (success, stalled):
-            - (True, False) if installation completed successfully
-            - (False, False) if installation failed
-            - (False, True) if installation stalled (no progress)
+            JobResult with success status and error details if failed
         """
         self.logger.info(f"Waiting for install job {job_id} ({version}) on {self.mgmt_ip}")
         
@@ -646,6 +729,8 @@ class DirectFirewallClient:
                 job_status = status.get('status', 'UNKNOWN')
                 job_result = status.get('result', '')
                 progress_str = status.get('progress', '0')
+                details = status.get('details', '')
+                warnings = status.get('warnings', [])
                 
                 try:
                     progress = int(progress_str)
@@ -669,22 +754,45 @@ class DirectFirewallClient:
                 if job_status == 'FIN':
                     if job_result == 'OK':
                         self.logger.info(f"Installation completed for {version} on {self.mgmt_ip}")
-                        return (True, False)
-                    else:
-                        details = status.get('details', 'Unknown error')
-                        self.logger.error(
-                            f"Installation failed for {version} on {self.mgmt_ip}: {details}"
+                        return JobResult(
+                            success=True,
+                            stalled=False,
+                            details=details,
+                            job_id=job_id,
+                            result_code=job_result,
+                            warnings=warnings
                         )
-                        return (False, False)
+                    else:
+                        self.logger.error(
+                            f"Installation failed for {version} on {self.mgmt_ip}: {details or 'Unknown error'}"
+                        )
+                        return JobResult(
+                            success=False,
+                            stalled=False,
+                            details=details or "Unknown error",
+                            job_id=job_id,
+                            result_code=job_result,
+                            warnings=warnings
+                        )
                 
                 # Check for stall timeout (no progress change)
                 stall_duration = time.time() - last_progress_time
                 if stall_duration > stall_timeout:
-                    self.logger.error(
-                        f"Install job {job_id} stalled - no progress for {int(stall_duration)} seconds "
-                        f"(last progress: {last_progress}%) on {self.mgmt_ip}"
+                    stall_msg = (
+                        f"No progress for {int(stall_duration)} seconds "
+                        f"(last progress: {last_progress}%)"
                     )
-                    return (False, True)
+                    self.logger.error(
+                        f"Install job {job_id} stalled - {stall_msg} on {self.mgmt_ip}"
+                    )
+                    return JobResult(
+                        success=False,
+                        stalled=True,
+                        details=stall_msg,
+                        job_id=job_id,
+                        result_code=job_result,
+                        warnings=warnings
+                    )
                 
                 if job_status in ('ACT', 'PEND'):
                     time.sleep(poll_interval)
