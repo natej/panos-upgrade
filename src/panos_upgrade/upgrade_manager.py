@@ -574,10 +574,13 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False
                 
-                self.logger.info(f"Device {serial} is back online, waiting for stabilization...")
-                device_status.upgrade_message = "Device is back online, stabilizing..."
+                stabilization_delay = self.config.reboot_stabilization_delay
+                self.logger.info(
+                    f"Device {serial} is back online, waiting {stabilization_delay} seconds for stabilization..."
+                )
+                device_status.upgrade_message = f"Device is back online, stabilizing ({stabilization_delay}s)..."
                 self._save_device_status(device_status)
-                time.sleep(10)
+                time.sleep(stabilization_delay)
                 
                 firewall_client = reboot_client
             

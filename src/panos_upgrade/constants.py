@@ -72,6 +72,7 @@ DEFAULT_JOB_STALL_TIMEOUT = 1800  # Timeout when job shows no progress
 DEFAULT_MAX_REBOOT_POLL_INTERVAL = 300
 DEFAULT_REBOOT_READY_TIMEOUT = 600  # Max time to wait for device after reboot
 DEFAULT_REBOOT_INITIAL_DELAY = 90  # Seconds to wait after reboot before polling
+DEFAULT_REBOOT_STABILIZATION_DELAY = 90  # Seconds to wait after device is online before proceeding
 DEFAULT_DISCOVERY_RETRY_ATTEMPTS = 3
 DEFAULT_DOWNLOAD_RETRY_ATTEMPTS = 3  # Retries for failed image downloads
 DEFAULT_TCP_SESSION_MARGIN = 5.0

@@ -432,6 +432,7 @@ Every command logs which source was used at INFO level:
 - `firewall.max_reboot_poll_interval` - Max interval between reboot status checks (default: 300)
 - `firewall.reboot_ready_timeout` - Max time to wait for device to become ready after reboot (default: 600)
 - `firewall.reboot_initial_delay` - Seconds to wait after initiating reboot before polling (default: 90)
+- `firewall.reboot_stabilization_delay` - Seconds to wait after device is online before proceeding (default: 90)
 - `firewall.download_retry_attempts` - Number of retry attempts for failed image downloads (default: 3)
 
 ### Worker Settings
