@@ -1,5 +1,6 @@
 """Pre-flight and post-flight validation system."""
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -100,6 +101,8 @@ class ValidationSystem:
         """
         Run pre-flight validation checks using direct firewall connection.
         
+        Includes retry logic for connection errors with configurable backoff.
+        
         Args:
             serial: Device serial number
             firewall_client: Direct firewall client instance
@@ -109,57 +112,78 @@ class ValidationSystem:
         """
         self.logger.info(f"Running pre-flight validation for {serial} (direct connection)")
         
-        try:
-            # Get system metrics via direct connection
-            metrics_data = firewall_client.get_system_metrics()
-            
-            metrics = ValidationMetrics(
-                tcp_sessions=metrics_data.get('tcp_sessions', 0),
-                route_count=metrics_data.get('route_count', 0),
-                routes=metrics_data.get('routes', []),
-                arp_count=metrics_data.get('arp_count', 0),
-                arp_entries=metrics_data.get('arp_entries', []),
-                disk_available_gb=metrics_data.get('disk_available_gb', 0.0)
-            )
-            
-            # Check disk space requirement
-            min_disk_gb = self.config.min_disk_gb
-            if metrics.disk_available_gb < min_disk_gb:
-                error_msg = (
-                    f"Insufficient disk space: {metrics.disk_available_gb:.2f} GB available, "
-                    f"{min_disk_gb:.2f} GB required"
-                )
-                self.logger.error(f"Pre-flight validation failed for {serial}: {error_msg}")
+        retry_attempts = self.config.validation_retry_attempts
+        retry_delay = self.config.validation_retry_delay
+        retry_backoff = self.config.validation_retry_backoff
+        
+        last_error = ""
+        current_delay = retry_delay
+        
+        for attempt in range(1, retry_attempts + 1):
+            try:
+                # Get system metrics via direct connection
+                metrics_data = firewall_client.get_system_metrics()
                 
-                # Save pre-flight metrics even on failure
+                metrics = ValidationMetrics(
+                    tcp_sessions=metrics_data.get('tcp_sessions', 0),
+                    route_count=metrics_data.get('route_count', 0),
+                    routes=metrics_data.get('routes', []),
+                    arp_count=metrics_data.get('arp_count', 0),
+                    arp_entries=metrics_data.get('arp_entries', []),
+                    disk_available_gb=metrics_data.get('disk_available_gb', 0.0)
+                )
+                
+                # Check disk space requirement
+                min_disk_gb = self.config.min_disk_gb
+                if metrics.disk_available_gb < min_disk_gb:
+                    error_msg = (
+                        f"Insufficient disk space: {metrics.disk_available_gb:.2f} GB available, "
+                        f"{min_disk_gb:.2f} GB required"
+                    )
+                    self.logger.error(f"Pre-flight validation failed for {serial}: {error_msg}")
+                    
+                    # Save pre-flight metrics even on failure
+                    self._save_pre_flight_metrics(serial, metrics)
+                    
+                    return False, metrics, error_msg
+                
+                # Save pre-flight metrics
                 self._save_pre_flight_metrics(serial, metrics)
                 
-                return False, metrics, error_msg
-            
-            # Save pre-flight metrics
-            self._save_pre_flight_metrics(serial, metrics)
-            
-            self.logger.info(
-                f"Pre-flight validation passed for {serial}: "
-                f"{metrics.tcp_sessions} sessions, {metrics.route_count} routes, "
-                f"{metrics.arp_count} ARP entries, {metrics.disk_available_gb:.2f} GB disk"
-            )
-            
-            return True, metrics, ""
-            
-        except Exception as e:
-            error_msg = f"Pre-flight validation error: {str(e)}"
-            self.logger.error(f"Pre-flight validation failed for {serial}: {error_msg}", exc_info=True)
-            # Return empty metrics on exception
-            empty_metrics = ValidationMetrics(
-                tcp_sessions=0,
-                route_count=0,
-                routes=[],
-                arp_count=0,
-                arp_entries=[],
-                disk_available_gb=0.0
-            )
-            return False, empty_metrics, error_msg
+                self.logger.info(
+                    f"Pre-flight validation passed for {serial}: "
+                    f"{metrics.tcp_sessions} sessions, {metrics.route_count} routes, "
+                    f"{metrics.arp_count} ARP entries, {metrics.disk_available_gb:.2f} GB disk"
+                )
+                
+                return True, metrics, ""
+                
+            except Exception as e:
+                last_error = str(e)
+                if attempt < retry_attempts:
+                    self.logger.warning(
+                        f"Pre-flight validation attempt {attempt}/{retry_attempts} failed for {serial}: {last_error}. "
+                        f"Retrying in {current_delay} seconds..."
+                    )
+                    time.sleep(current_delay)
+                    current_delay = int(current_delay * retry_backoff)
+                else:
+                    self.logger.error(
+                        f"Pre-flight validation failed for {serial} after {retry_attempts} attempts: {last_error}",
+                        exc_info=True
+                    )
+        
+        # All retries exhausted
+        error_msg = f"Pre-flight validation error after {retry_attempts} attempts: {last_error}"
+        empty_metrics = ValidationMetrics(
+            tcp_sessions=0,
+            route_count=0,
+            routes=[],
+            arp_count=0,
+            arp_entries=[],
+            disk_available_gb=0.0
+        )
+        return False, empty_metrics, error_msg
     
     def run_post_flight_validation(
         self,
@@ -242,6 +266,8 @@ class ValidationSystem:
         """
         Run post-flight validation using direct firewall connection.
         
+        Includes retry logic for connection errors with configurable backoff.
+        
         Args:
             serial: Device serial number
             firewall_client: Direct firewall client instance
@@ -252,60 +278,80 @@ class ValidationSystem:
         """
         self.logger.info(f"Running post-flight validation for {serial} (direct connection)")
         
-        try:
-            # Get current system metrics via direct connection
-            metrics_data = firewall_client.get_system_metrics()
-            
-            post_flight_metrics = ValidationMetrics(
-                tcp_sessions=metrics_data.get('tcp_sessions', 0),
-                route_count=metrics_data.get('route_count', 0),
-                routes=metrics_data.get('routes', []),
-                arp_count=metrics_data.get('arp_count', 0),
-                arp_entries=metrics_data.get('arp_entries', []),
-                disk_available_gb=metrics_data.get('disk_available_gb', 0.0)
-            )
-            
-            # Compare metrics
-            comparison = self._compare_metrics(pre_flight_metrics, post_flight_metrics)
-            
-            # Determine if validation passed
-            validation_passed = all(
-                comp.within_margin for comp in comparison.values()
-            )
-            
-            # Create validation result
-            result = ValidationResult(
-                serial=serial,
-                timestamp=datetime.now(timezone.utc).isoformat() + "Z",
-                pre_flight=pre_flight_metrics,
-                post_flight=post_flight_metrics,
-                comparison=comparison,
-                validation_passed=validation_passed
-            )
-            
-            # Save post-flight validation result
-            self._save_post_flight_validation(serial, result)
-            
-            if validation_passed:
-                self.logger.info(f"Post-flight validation passed for {serial}")
-            else:
-                self.logger.warning(f"Post-flight validation failed for {serial}")
-                self._log_validation_differences(serial, comparison)
-            
-            return validation_passed, result
-            
-        except Exception as e:
-            self.logger.error(f"Post-flight validation error for {serial}: {e}", exc_info=True)
-            
-            # Create failed result
-            result = ValidationResult(
-                serial=serial,
-                timestamp=datetime.now(timezone.utc).isoformat() + "Z",
-                pre_flight=pre_flight_metrics,
-                validation_passed=False
-            )
-            
-            return False, result
+        retry_attempts = self.config.validation_retry_attempts
+        retry_delay = self.config.validation_retry_delay
+        retry_backoff = self.config.validation_retry_backoff
+        
+        last_error = ""
+        current_delay = retry_delay
+        
+        for attempt in range(1, retry_attempts + 1):
+            try:
+                # Get current system metrics via direct connection
+                metrics_data = firewall_client.get_system_metrics()
+                
+                post_flight_metrics = ValidationMetrics(
+                    tcp_sessions=metrics_data.get('tcp_sessions', 0),
+                    route_count=metrics_data.get('route_count', 0),
+                    routes=metrics_data.get('routes', []),
+                    arp_count=metrics_data.get('arp_count', 0),
+                    arp_entries=metrics_data.get('arp_entries', []),
+                    disk_available_gb=metrics_data.get('disk_available_gb', 0.0)
+                )
+                
+                # Compare metrics
+                comparison = self._compare_metrics(pre_flight_metrics, post_flight_metrics)
+                
+                # Determine if validation passed
+                validation_passed = all(
+                    comp.within_margin for comp in comparison.values()
+                )
+                
+                # Create validation result
+                result = ValidationResult(
+                    serial=serial,
+                    timestamp=datetime.now(timezone.utc).isoformat() + "Z",
+                    pre_flight=pre_flight_metrics,
+                    post_flight=post_flight_metrics,
+                    comparison=comparison,
+                    validation_passed=validation_passed
+                )
+                
+                # Save post-flight validation result
+                self._save_post_flight_validation(serial, result)
+                
+                if validation_passed:
+                    self.logger.info(f"Post-flight validation passed for {serial}")
+                else:
+                    self.logger.warning(f"Post-flight validation failed for {serial}")
+                    self._log_validation_differences(serial, comparison)
+                
+                return validation_passed, result
+                
+            except Exception as e:
+                last_error = str(e)
+                if attempt < retry_attempts:
+                    self.logger.warning(
+                        f"Post-flight validation attempt {attempt}/{retry_attempts} failed for {serial}: {last_error}. "
+                        f"Retrying in {current_delay} seconds..."
+                    )
+                    time.sleep(current_delay)
+                    current_delay = int(current_delay * retry_backoff)
+                else:
+                    self.logger.error(
+                        f"Post-flight validation failed for {serial} after {retry_attempts} attempts: {last_error}",
+                        exc_info=True
+                    )
+        
+        # All retries exhausted - create failed result
+        result = ValidationResult(
+            serial=serial,
+            timestamp=datetime.now(timezone.utc).isoformat() + "Z",
+            pre_flight=pre_flight_metrics,
+            validation_passed=False
+        )
+        
+        return False, result
     
     def _compare_metrics(
         self,

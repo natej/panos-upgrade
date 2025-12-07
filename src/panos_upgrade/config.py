@@ -73,6 +73,9 @@ class Config:
                 "route_margin": constants.DEFAULT_ROUTE_MARGIN,
                 "arp_margin": constants.DEFAULT_ARP_MARGIN,
                 "min_disk_gb": constants.DEFAULT_MIN_DISK_GB,
+                "retry_attempts": constants.DEFAULT_VALIDATION_RETRY_ATTEMPTS,
+                "retry_delay": constants.DEFAULT_VALIDATION_RETRY_DELAY,
+                "retry_backoff": constants.DEFAULT_VALIDATION_RETRY_BACKOFF,
                 "custom_metrics": []
             },
             "logging": {
@@ -200,6 +203,21 @@ class Config:
     def min_disk_gb(self) -> float:
         """Get minimum required disk space in GB."""
         return self.get("validation.min_disk_gb", constants.DEFAULT_MIN_DISK_GB)
+    
+    @property
+    def validation_retry_attempts(self) -> int:
+        """Get number of retry attempts for validation on connection errors."""
+        return self.get("validation.retry_attempts", constants.DEFAULT_VALIDATION_RETRY_ATTEMPTS)
+    
+    @property
+    def validation_retry_delay(self) -> int:
+        """Get initial delay between validation retries in seconds."""
+        return self.get("validation.retry_delay", constants.DEFAULT_VALIDATION_RETRY_DELAY)
+    
+    @property
+    def validation_retry_backoff(self) -> float:
+        """Get backoff multiplier for validation retry delays."""
+        return self.get("validation.retry_backoff", constants.DEFAULT_VALIDATION_RETRY_BACKOFF)
     
     @property
     def upgrade_paths_file(self) -> Path:

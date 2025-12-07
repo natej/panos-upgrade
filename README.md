@@ -445,6 +445,9 @@ Every command logs which source was used at INFO level:
 - `validation.route_margin` - Route count change tolerance (default: 0.0)
 - `validation.arp_margin` - ARP entry change tolerance (default: 0.0)
 - `validation.min_disk_gb` - Minimum required disk space in GB before each image download (default: 5.0). This is checked before downloading each image in the upgrade path, not a total. Set this to at least the size of the largest image that will be downloaded.
+- `validation.retry_attempts` - Number of retry attempts for validation on connection errors (default: 3)
+- `validation.retry_delay` - Initial delay in seconds between validation retries (default: 10)
+- `validation.retry_backoff` - Backoff multiplier for retry delays (default: 2.0)
 
 ### Logging Settings
 - `logging.level` - Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)

@@ -30,6 +30,9 @@
     "route_margin": 0.0,
     "arp_margin": 0.0,
     "min_disk_gb": 5.0,
+    "retry_attempts": 3,
+    "retry_delay": 10,
+    "retry_backoff": 2.0,
     "custom_metrics": []
   },
   "logging": {
