@@ -340,6 +340,13 @@ class UpgradeManager:
         """
         Execute upgrade through version path.
         
+        New flow (for multi-step upgrades):
+        1. Download ALL images in the upgrade path
+        2. Verify ALL images are downloaded (hard requirement)
+        3. Install ONLY the final version (PAN-OS handles intermediate steps)
+        4. Reboot and wait
+        5. Post-flight validation
+        
         Args:
             device_status: Device status object
             job_id: Job identifier
@@ -350,54 +357,8 @@ class UpgradeManager:
             True if successful
         """
         serial = device_status.serial
-        
-        for idx, target_version in enumerate(device_status.upgrade_path):
-            # Check for cancellation
-            if self._is_cancelled(job_id, serial):
-                self.logger.info(f"Upgrade cancelled for {serial}")
-                device_status.upgrade_status = UpgradeStatus.CANCELLED.value
-                self._save_device_status(device_status)
-                return False
-            
-            device_status.current_path_index = idx
-            device_status.upgrade_message = f"Upgrading to version {target_version} (step {idx + 1} of {len(device_status.upgrade_path)})"
-            self._save_device_status(device_status)
-            
-            self.logger.info(
-                f"Upgrading {serial} to version {target_version} "
-                f"({idx + 1}/{len(device_status.upgrade_path)})"
-            )
-            
-            # Execute single version upgrade
-            success = self._upgrade_to_version(device_status, target_version, job_id, dry_run, mgmt_ip)
-            
-            if not success:
-                return False
-        
-        return True
-    
-    def _upgrade_to_version(
-        self,
-        device_status: DeviceStatus,
-        target_version: str,
-        job_id: str,
-        dry_run: bool,
-        mgmt_ip: str
-    ) -> bool:
-        """
-        Upgrade device to a specific version.
-        
-        Args:
-            device_status: Device status object
-            target_version: Target version
-            job_id: Job identifier
-            dry_run: Whether this is a dry run
-            mgmt_ip: Management IP for direct firewall connection
-            
-        Returns:
-            True if successful
-        """
-        serial = device_status.serial
+        upgrade_path = device_status.upgrade_path
+        final_version = upgrade_path[-1] if upgrade_path else ""
         
         # Create direct firewall client for this operation
         firewall_client = self._create_firewall_client(mgmt_ip)
@@ -406,14 +367,12 @@ class UpgradeManager:
             # Phase 1: Pre-flight validation
             device_status.current_phase = UpgradePhase.PRE_FLIGHT.value
             device_status.upgrade_status = UpgradeStatus.VALIDATING.value
-            device_status.progress = 10
-            device_status.upgrade_message = f"Running pre-flight validation for version {target_version}"
+            device_status.progress = 5
+            device_status.upgrade_message = "Running pre-flight validation"
             self._save_device_status(device_status)
             
             if dry_run:
                 self.logger.info(f"[DRY RUN] Would validate {serial}")
-                device_status.upgrade_message = f"[DRY RUN] Would validate {serial} before upgrading to {target_version}"
-                self._save_device_status(device_status)
             else:
                 passed, metrics, error = self.validation.run_pre_flight_validation_direct(
                     serial, firewall_client
@@ -424,7 +383,6 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False
                 
-                # Store disk space info
                 device_status.disk_space = DiskSpaceInfo(
                     available_gb=metrics.disk_available_gb,
                     required_gb=self.config.min_disk_gb,
@@ -433,9 +391,7 @@ class UpgradeManager:
             
             # Phase 2: Refresh software list (only once per device)
             if serial not in self._software_check_done:
-                device_status.current_phase = UpgradePhase.DOWNLOAD.value
-                device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
-                device_status.progress = 25
+                device_status.progress = 10
                 device_status.upgrade_message = "Refreshing available software versions..."
                 self._save_device_status(device_status)
                 
@@ -451,129 +407,90 @@ class UpgradeManager:
                 
                 self._software_check_done.add(serial)
             
-            # Phase 3: Download (skip if already downloaded)
+            # Phase 3: Download ALL images in the upgrade path
             device_status.current_phase = UpgradePhase.DOWNLOAD.value
             device_status.upgrade_status = UpgradeStatus.DOWNLOADING.value
-            device_status.progress = 30
-            device_status.upgrade_message = f"Checking if version {target_version} is already downloaded"
+            device_status.progress = 15
+            device_status.upgrade_message = f"Preparing to download {len(upgrade_path)} image(s)"
             self._save_device_status(device_status)
             
-            if dry_run:
-                self.logger.info(f"[DRY RUN] Would download version {target_version} to {serial}")
-                device_status.upgrade_message = f"[DRY RUN] Would download version {target_version}"
-                self._save_device_status(device_status)
-                time.sleep(2)  # Simulate download
-            else:
-                # Check if version is already downloaded via direct connection
-                software_info = firewall_client.get_software_info(
-                    timeout=self.config.software_info_timeout
-                )
-                already_downloaded = False
-                for sw in software_info.get("versions", []):
-                    if sw.get("version") == target_version and sw.get("downloaded", "no").lower() == "yes":
-                        already_downloaded = True
-                        break
-                
-                if already_downloaded:
-                    self.logger.info(
-                        f"Version {target_version} already downloaded on {serial}, skipping download"
-                    )
-                    device_status.upgrade_message = f"Version {target_version} already downloaded, skipping to install"
-                    device_status.skipped_versions.append(target_version)
-                    self._save_device_status(device_status)
-                else:
-                    device_status.upgrade_message = f"Downloading version {target_version}"
-                    self._save_device_status(device_status)
-                    
-                    job_id_download = firewall_client.download_software(target_version)
-                    if not job_id_download:
-                        error = f"Failed to initiate download of {target_version}"
-                        device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
-                        self._save_device_status(device_status)
-                        return False
-                    
-                    # Wait for download to complete
-                    device_status.upgrade_message = f"Downloading {target_version} (job {job_id_download})..."
-                    self._save_device_status(device_status)
-                    
-                    def update_download_progress(progress: int):
-                        device_status.progress = 30 + int(progress * 0.25)  # 30-55% range
-                        device_status.upgrade_message = f"Downloading {target_version}: {progress}%"
-                        self._save_device_status(device_status)
-                    
-                    success, stalled = firewall_client.wait_for_download(
-                        job_id_download, target_version,
-                        stall_timeout=self.config.job_stall_timeout,
-                        progress_callback=update_download_progress
-                    )
-                    if not success:
-                        if stalled:
-                            error = f"Download of {target_version} stalled - job showed no progress"
-                            device_status.upgrade_message = f"Job stalled: Download of {target_version}"
-                        else:
-                            error = f"Download of {target_version} failed"
-                        device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
-                        self._save_device_status(device_status)
-                        return False
-                    
-                    device_status.downloaded_versions.append(target_version)
+            success = self._download_all_images(
+                device_status, firewall_client, job_id, dry_run
+            )
+            if not success:
+                return False
             
-            # Phase 4: Install
+            # Phase 4: Verify ALL images are downloaded (hard requirement)
+            device_status.progress = 55
+            device_status.upgrade_message = "Verifying all images are downloaded..."
+            self._save_device_status(device_status)
+            
+            if not dry_run:
+                missing_images = self._verify_all_images_downloaded(
+                    firewall_client, upgrade_path
+                )
+                if missing_images:
+                    error = f"Verification failed: missing images: {', '.join(missing_images)}"
+                    self.logger.error(error, extra={'serial': serial})
+                    device_status.upgrade_status = UpgradeStatus.FAILED.value
+                    device_status.upgrade_message = error
+                    device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
+                    self._save_device_status(device_status)
+                    return False
+                
+                self.logger.info(f"All {len(upgrade_path)} images verified on {serial}")
+            
+            # Phase 5: Install ONLY the final version
             device_status.current_phase = UpgradePhase.INSTALL.value
             device_status.upgrade_status = UpgradeStatus.INSTALLING.value
             device_status.progress = 60
-            device_status.upgrade_message = f"Installing version {target_version}"
+            device_status.upgrade_message = f"Installing final version {final_version}"
             self._save_device_status(device_status)
             
             if dry_run:
-                self.logger.info(f"[DRY RUN] Would install version {target_version} on {serial}")
-                device_status.upgrade_message = f"[DRY RUN] Would install version {target_version}"
-                self._save_device_status(device_status)
-                time.sleep(2)  # Simulate install
+                self.logger.info(f"[DRY RUN] Would install version {final_version} on {serial}")
+                time.sleep(2)
             else:
-                job_id_install = firewall_client.install_software(target_version)
+                job_id_install = firewall_client.install_software(final_version)
                 if not job_id_install:
-                    error = f"Failed to initiate installation of {target_version}"
+                    error = f"Failed to initiate installation of {final_version}"
                     device_status.add_error(UpgradePhase.INSTALL.value, error)
                     self._save_device_status(device_status)
                     return False
                 
-                # Wait for installation to complete
-                device_status.upgrade_message = f"Installing {target_version} (job {job_id_install})..."
+                device_status.upgrade_message = f"Installing {final_version} (job {job_id_install})..."
                 self._save_device_status(device_status)
                 
                 def update_install_progress(progress: int):
                     device_status.progress = 60 + int(progress * 0.15)  # 60-75% range
-                    device_status.upgrade_message = f"Installing {target_version}: {progress}%"
+                    device_status.upgrade_message = f"Installing {final_version}: {progress}%"
                     self._save_device_status(device_status)
                 
                 success, stalled = firewall_client.wait_for_install(
-                    job_id_install, target_version,
+                    job_id_install, final_version,
                     stall_timeout=self.config.job_stall_timeout,
                     progress_callback=update_install_progress
                 )
                 if not success:
                     if stalled:
-                        error = f"Installation of {target_version} stalled - job showed no progress"
-                        device_status.upgrade_message = f"Job stalled: Installation of {target_version}"
+                        error = f"Installation of {final_version} stalled - job showed no progress"
+                        device_status.upgrade_message = f"Job stalled: Installation of {final_version}"
                     else:
-                        error = f"Installation of {target_version} failed"
+                        error = f"Installation of {final_version} failed"
                     device_status.add_error(UpgradePhase.INSTALL.value, error)
                     self._save_device_status(device_status)
                     return False
             
-            # Phase 5: Reboot
+            # Phase 6: Reboot
             device_status.current_phase = UpgradePhase.REBOOT.value
             device_status.upgrade_status = UpgradeStatus.REBOOTING.value
             device_status.progress = 75
-            device_status.upgrade_message = f"Rebooting device to activate version {target_version}"
+            device_status.upgrade_message = f"Rebooting device to activate version {final_version}"
             self._save_device_status(device_status)
             
             if dry_run:
                 self.logger.info(f"[DRY RUN] Would reboot {serial}")
-                device_status.upgrade_message = f"[DRY RUN] Would reboot device"
-                self._save_device_status(device_status)
-                time.sleep(2)  # Simulate reboot
+                time.sleep(2)
             else:
                 success = firewall_client.reboot_device()
                 if not success:
@@ -582,12 +499,10 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False
                 
-                # Wait for device to come back (create new client after reboot)
                 self.logger.info(f"Waiting for {serial} to reboot and come back online...")
-                device_status.upgrade_message = f"Waiting for device to come back online after reboot"
+                device_status.upgrade_message = "Waiting for device to come back online after reboot"
                 self._save_device_status(device_status)
                 
-                # Create new client for checking device ready (connection will be reset)
                 reboot_client = self._create_firewall_client(mgmt_ip)
                 max_poll_interval = self.config.max_reboot_poll_interval
                 ready = reboot_client.check_device_ready(timeout=600, max_poll_interval=max_poll_interval)
@@ -597,52 +512,220 @@ class UpgradeManager:
                     self._save_device_status(device_status)
                     return False
                 
-                # Additional wait to ensure device is fully ready
                 self.logger.info(f"Device {serial} is back online, waiting for stabilization...")
-                device_status.upgrade_message = f"Device is back online, stabilizing..."
+                device_status.upgrade_message = "Device is back online, stabilizing..."
                 self._save_device_status(device_status)
-                time.sleep(10)  # Give device time to fully initialize
+                time.sleep(10)
                 
-                # Update firewall_client reference for post-flight
                 firewall_client = reboot_client
             
-            # Phase 6: Post-flight validation
+            # Phase 7: Post-flight validation
             device_status.current_phase = UpgradePhase.POST_FLIGHT.value
             device_status.progress = 90
-            device_status.upgrade_message = f"Running post-flight validation for version {target_version}"
+            device_status.upgrade_message = f"Running post-flight validation for version {final_version}"
             self._save_device_status(device_status)
             
             if dry_run:
                 self.logger.info(f"[DRY RUN] Would validate {serial} post-upgrade")
-                device_status.upgrade_message = f"[DRY RUN] Would validate post-upgrade"
-                self._save_device_status(device_status)
             else:
-                # Get pre-flight metrics
                 pre_metrics = self.validation.get_latest_pre_flight_metrics(serial)
                 if pre_metrics:
                     passed, result = self.validation.run_post_flight_validation_direct(
                         serial, firewall_client, pre_metrics
                     )
-                    
                     if not passed:
                         self.logger.warning(
                             f"Post-flight validation failed for {serial}, but continuing"
                         )
             
             # Update current version
-            device_status.current_version = target_version
+            device_status.current_version = final_version
             device_status.progress = 100
-            device_status.upgrade_message = f"Successfully upgraded to version {target_version}"
+            device_status.upgrade_message = f"Successfully upgraded to version {final_version}"
             self._save_device_status(device_status)
             
             return True
             
         except Exception as e:
-            error = f"Upgrade to {target_version} failed: {str(e)}"
+            error = f"Upgrade failed: {str(e)}"
             self.logger.error(error, exc_info=True, extra={'serial': serial})
             device_status.add_error(device_status.current_phase, error, str(e))
             self._save_device_status(device_status)
             return False
+    
+    def _download_all_images(
+        self,
+        device_status: DeviceStatus,
+        firewall_client: DirectFirewallClient,
+        job_id: str,
+        dry_run: bool
+    ) -> bool:
+        """
+        Download all images in the upgrade path.
+        
+        Args:
+            device_status: Device status object
+            firewall_client: Direct firewall client
+            job_id: Job identifier
+            dry_run: Whether this is a dry run
+            
+        Returns:
+            True if all downloads successful
+        """
+        serial = device_status.serial
+        upgrade_path = device_status.upgrade_path
+        total_images = len(upgrade_path)
+        retry_attempts = self.config.download_retry_attempts
+        
+        for idx, target_version in enumerate(upgrade_path):
+            # Check for cancellation
+            if self._is_cancelled(job_id, serial):
+                self.logger.info(f"Upgrade cancelled for {serial}")
+                device_status.upgrade_status = UpgradeStatus.CANCELLED.value
+                device_status.upgrade_message = "Upgrade cancelled by admin"
+                self._save_device_status(device_status)
+                return False
+            
+            device_status.current_path_index = idx
+            progress_base = 15 + (idx * 35 // max(total_images, 1))  # 15-50% range for downloads
+            device_status.progress = progress_base
+            device_status.upgrade_message = f"Processing image {idx + 1}/{total_images}: {target_version}"
+            self._save_device_status(device_status)
+            
+            if dry_run:
+                self.logger.info(f"[DRY RUN] Would download version {target_version} to {serial}")
+                device_status.upgrade_message = f"[DRY RUN] Would download version {target_version}"
+                self._save_device_status(device_status)
+                time.sleep(1)
+                continue
+            
+            # Check if version is already downloaded
+            software_info = firewall_client.get_software_info(
+                timeout=self.config.software_info_timeout
+            )
+            already_downloaded = False
+            for sw in software_info.get("versions", []):
+                if sw.get("version") == target_version and sw.get("downloaded", "no").lower() == "yes":
+                    already_downloaded = True
+                    break
+            
+            if already_downloaded:
+                self.logger.info(
+                    f"Version {target_version} already downloaded on {serial}, skipping download"
+                )
+                device_status.upgrade_message = f"Version {target_version} already downloaded"
+                device_status.skipped_versions.append(target_version)
+                self._save_device_status(device_status)
+                continue
+            
+            # Check disk space before download
+            disk_space_gb = firewall_client.check_disk_space()
+            min_disk_gb = self.config.min_disk_gb
+            
+            device_status.disk_space = DiskSpaceInfo(
+                available_gb=disk_space_gb,
+                required_gb=min_disk_gb,
+                check_passed=disk_space_gb >= min_disk_gb
+            )
+            
+            if disk_space_gb < min_disk_gb:
+                error = f"Insufficient disk space before downloading {target_version}: {disk_space_gb:.2f} GB available, {min_disk_gb:.2f} GB required"
+                self.logger.error(error, extra={'serial': serial})
+                device_status.upgrade_status = UpgradeStatus.FAILED.value
+                device_status.upgrade_message = error
+                device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
+                self._save_device_status(device_status)
+                return False
+            
+            # Download with retry logic
+            download_success = False
+            last_error = ""
+            
+            for attempt in range(1, retry_attempts + 1):
+                if attempt > 1:
+                    self.logger.info(f"Retry attempt {attempt}/{retry_attempts} for {target_version} on {serial}")
+                    device_status.upgrade_message = f"Retry {attempt}/{retry_attempts}: Downloading {target_version}"
+                    self._save_device_status(device_status)
+                
+                device_status.upgrade_message = f"Downloading {target_version} ({idx + 1}/{total_images})"
+                self._save_device_status(device_status)
+                
+                job_id_download = firewall_client.download_software(target_version)
+                if not job_id_download:
+                    last_error = f"Failed to initiate download of {target_version}"
+                    self.logger.warning(f"{last_error} (attempt {attempt}/{retry_attempts})")
+                    continue
+                
+                device_status.upgrade_message = f"Downloading {target_version} (job {job_id_download})..."
+                self._save_device_status(device_status)
+                
+                def update_download_progress(progress: int):
+                    version_slice = 35 // max(total_images, 1)
+                    base_progress = 15 + (idx * version_slice)
+                    device_status.progress = base_progress + int(progress * version_slice / 100)
+                    device_status.upgrade_message = f"Downloading {target_version}: {progress}%"
+                    self._save_device_status(device_status)
+                
+                success, stalled = firewall_client.wait_for_download(
+                    job_id_download, target_version,
+                    stall_timeout=self.config.job_stall_timeout,
+                    progress_callback=update_download_progress
+                )
+                
+                if success:
+                    download_success = True
+                    device_status.downloaded_versions.append(target_version)
+                    self.logger.info(f"Successfully downloaded {target_version} on {serial}")
+                    break
+                else:
+                    if stalled:
+                        last_error = f"Download of {target_version} stalled - job showed no progress"
+                    else:
+                        last_error = f"Download of {target_version} failed"
+                    self.logger.warning(f"{last_error} (attempt {attempt}/{retry_attempts})")
+            
+            if not download_success:
+                error = f"{last_error} after {retry_attempts} attempts"
+                device_status.upgrade_status = UpgradeStatus.FAILED.value
+                device_status.upgrade_message = error
+                device_status.add_error(UpgradePhase.DOWNLOAD.value, error)
+                self._save_device_status(device_status)
+                return False
+        
+        self.logger.info(f"All {total_images} images downloaded/verified on {serial}")
+        return True
+    
+    def _verify_all_images_downloaded(
+        self,
+        firewall_client: DirectFirewallClient,
+        upgrade_path: List[str]
+    ) -> List[str]:
+        """
+        Verify all images in the upgrade path are downloaded on the device.
+        
+        Args:
+            firewall_client: Direct firewall client
+            upgrade_path: List of versions that should be downloaded
+            
+        Returns:
+            List of missing image versions (empty if all present)
+        """
+        software_info = firewall_client.get_software_info(
+            timeout=self.config.software_info_timeout
+        )
+        
+        downloaded_versions = set()
+        for sw in software_info.get("versions", []):
+            if sw.get("downloaded", "no").lower() == "yes":
+                downloaded_versions.add(sw.get("version", ""))
+        
+        missing = []
+        for version in upgrade_path:
+            if version not in downloaded_versions:
+                missing.append(version)
+        
+        return missing
+    
     
     
     def _init_device_status(self, serial: str, job_id: str) -> DeviceStatus:

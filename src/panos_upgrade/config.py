@@ -57,7 +57,8 @@ class Config:
                 "software_check_timeout": constants.DEFAULT_SOFTWARE_CHECK_TIMEOUT,
                 "software_info_timeout": constants.DEFAULT_SOFTWARE_INFO_TIMEOUT,
                 "job_stall_timeout": constants.DEFAULT_JOB_STALL_TIMEOUT,
-                "max_reboot_poll_interval": constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL
+                "max_reboot_poll_interval": constants.DEFAULT_MAX_REBOOT_POLL_INTERVAL,
+                "download_retry_attempts": constants.DEFAULT_DOWNLOAD_RETRY_ATTEMPTS
             },
             "workers": {
                 "max": constants.DEFAULT_WORKERS,
@@ -239,6 +240,11 @@ class Config:
     def discovery_retry_attempts(self) -> int:
         """Get number of retry attempts for device discovery HA queries."""
         return self.get("discovery.retry_attempts", constants.DEFAULT_DISCOVERY_RETRY_ATTEMPTS)
+    
+    @property
+    def download_retry_attempts(self) -> int:
+        """Get number of retry attempts for failed image downloads."""
+        return self.get("firewall.download_retry_attempts", constants.DEFAULT_DOWNLOAD_RETRY_ATTEMPTS)
 
 
 # Global config instance

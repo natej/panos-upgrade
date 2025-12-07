@@ -489,6 +489,7 @@ panos-upgrade job submit --device FAILED_SERIAL --download-only
 |---------|---------|-------------|
 | `firewall.software_check_timeout` | 90 | Timeout (seconds) for `request system software check` |
 | `firewall.software_info_timeout` | 120 | Timeout (seconds) for `request system software info` |
+| `firewall.download_retry_attempts` | 3 | Number of retry attempts for failed image downloads |
 | `validation.min_disk_gb` | 5.0 | Minimum disk space (GB) required before each image download. Set to at least the largest image size. |
 
 ## Web Integration

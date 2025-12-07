@@ -103,6 +103,9 @@ panos-upgrade config set validation.min_disk_gb 5.0
 
 # Set TCP session validation margin (percentage)
 panos-upgrade config set validation.tcp_session_margin 5.0
+
+# Set download retry attempts (for failed image downloads)
+panos-upgrade config set firewall.download_retry_attempts 3
 ```
 
 ## Starting the Daemon
@@ -340,23 +343,32 @@ All operations connect **directly to firewalls** using management IPs from the d
 3. **Software Check**
    - Refresh available software versions
 
-4. **Download**
-   - Check if image already downloaded (skip if present)
-   - Download software image directly to firewall
-   - Monitor download progress
+4. **Download ALL Images** (for multi-step upgrade paths)
+   - For each version in the upgrade path:
+     - Check disk space before each download
+     - Check if image already downloaded (skip if present)
+     - Download software image with configurable retry attempts
+   - All images must be downloaded before proceeding
 
-5. **Install**
-   - Install software
+5. **Verify ALL Images Downloaded**
+   - Query device to confirm all images in the upgrade path are present
+   - This is a hard requirement - upgrade will not proceed if any image is missing
+
+6. **Install FINAL Version Only**
+   - Install only the last version in the upgrade path
+   - PAN-OS automatically handles intermediate version upgrades
    - Wait for installation to complete
 
-6. **Reboot**
+7. **Reboot**
    - Reboot device
    - Wait for device to come online (exponential backoff)
 
-7. **Post-flight Validation**
+8. **Post-flight Validation**
    - Collect metrics again
    - Compare with pre-flight
    - Log differences
+
+> **Note**: For multi-step upgrades (e.g., 10.1.0 → 10.5.1 → 11.1.0), all intermediate images are downloaded first, but only the final version (11.1.0) is explicitly installed. PAN-OS handles the intermediate upgrades automatically when the images are present.
 
 ## Daemon Restart Recovery
 
@@ -375,10 +387,12 @@ When an upgrade begins:
 
 Consider a device at version `10.1.0` with upgrade path `["10.5.1", "11.1.0"]`:
 
-- Device upgrades to `10.5.1` successfully
-- Daemon crashes before continuing to `11.1.0`
-- Without recovery: Daemon would query device, see `10.5.1`, and look up a potentially different path
-- With recovery: Daemon uses stored `starting_version = "10.1.0"` to get the original path and continues correctly
+- Daemon downloads 10.5.1 successfully
+- Daemon crashes before downloading 11.1.0
+- Without recovery: Daemon would query device, see `10.1.0`, and start over
+- With recovery: Daemon uses stored `starting_version = "10.1.0"` to get the original path and continues from where it left off
+
+This also applies during install/reboot phases - the daemon tracks which images have been downloaded and resumes appropriately.
 
 ### Status Files
 

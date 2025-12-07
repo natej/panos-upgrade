@@ -430,6 +430,7 @@ Every command logs which source was used at INFO level:
 - `firewall.software_info_timeout` - Timeout for software info command (default: 120)
 - `firewall.job_stall_timeout` - Timeout when download/install jobs show no progress (default: 1800)
 - `firewall.max_reboot_poll_interval` - Max interval between reboot status checks (default: 300)
+- `firewall.download_retry_attempts` - Number of retry attempts for failed image downloads (default: 3)
 
 ### Worker Settings
 - `workers.max` - Maximum worker threads (1-50, default: 5)
@@ -465,28 +466,33 @@ All operations connect **directly to firewalls** using management IPs from the d
 3. **Software Check**
    - Run `request system software check` to refresh available versions
 
-4. **Download**
-   - Check if image already downloaded (skip if present)
-   - Download software image directly to firewall if needed
-   - Monitor download progress via job status
+4. **Download ALL Images** (for multi-step upgrade paths)
+   - For each version in the upgrade path:
+     - Check disk space before each download
+     - Check if image already downloaded (skip if present)
+     - Download software image with configurable retry attempts
+   - All images must be downloaded before proceeding
 
-5. **Install**
-   - Install software on device
+5. **Verify ALL Images Downloaded**
+   - Query device to confirm all images in the upgrade path are present
+   - This is a hard requirement - upgrade will not proceed if any image is missing
+
+6. **Install FINAL Version Only**
+   - Install only the last version in the upgrade path
+   - PAN-OS automatically handles intermediate version upgrades
    - Wait for installation to complete
 
-6. **Reboot**
+7. **Reboot**
    - Reboot device
    - Wait for device to come back online (up to 10 minutes)
    - Uses exponential backoff polling
 
-7. **Post-flight Validation**
+8. **Post-flight Validation**
    - Collect metrics again
    - Compare with pre-flight baseline
    - Log differences for admin review
 
-8. **Multi-version Path**
-   - Repeat steps 2-7 for each version in upgrade path
-   - Update device status after each version
+> **Note**: For multi-step upgrades (e.g., 10.1.0 → 10.5.1 → 11.1.0), all intermediate images are downloaded first, but only the final version (11.1.0) is explicitly installed. PAN-OS handles the intermediate upgrades automatically when the images are present.
 
 ## Documentation
 
